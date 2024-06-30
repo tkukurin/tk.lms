@@ -1,0 +1,24 @@
+[project]
+name = "tk-llms"
+version = "0.1.0"
+description = "Some LLM experiments"
+authors = [
+    {"name" = "Toni Kukurin", "email" = "tkukurin@gmail.com"},
+]
+requires-python = ">=3.10"
+dependencies = [
+    "llama-cpp-python",
+    "transformers[sentencepiece]",
+    "accelerate",
+    "datasets",
+    "diskcache",
+    "rich",
+    "bitsandbytes",
+    "ipykernel",
+    "networkx",
+    "scikit-learn",
+    "numpy",
+    "scipy",
+    "pandas",
+    "einops",
+]
