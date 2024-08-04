@@ -22,8 +22,10 @@ dependencies = [
     "pandas",
     "einops",
     "evaluate",
-    "pytest"
+    "pytest",
+    "loguru"
 ]
+
 [tool.pixi.project]
 channels = ["conda-forge"]
 platforms = ["linux-64"]
@@ -32,3 +34,7 @@ platforms = ["linux-64"]
 tk-llms = { path = ".", editable = true }
 
 [tool.pixi.tasks]
+
+# TODO not sure, should prob use `pixi add` going fwd
+# [tool.pixi.dependencies]
+# loguru = ">=0.7.2,<0.8"
