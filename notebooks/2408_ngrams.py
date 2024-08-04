@@ -1,4 +1,8 @@
+"""N-gram models on tiny shakespeare.
 
+How does the model behave for various n?
+How does a pre-trained tokenizer help w/ coherence?
+"""
 # %%
 import tk
 import importlib
@@ -32,4 +36,3 @@ print(out)
 # %%
 out = tokenizer_gpt2.convert_tokens_to_string(out)
 print(out)
-# %%
