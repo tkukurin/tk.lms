@@ -788,7 +788,7 @@ def main():
 
             if cur_step % training_args.save_steps == 0 and cur_step > 0 and jax.process_index() == 0:
                 params = jax.device_get(unreplicate(state.params))
-                outdir = f"{training_args.output_dir}/epoch={epoch}"
+                outdir = f"{training_args.output_dir}/step={cur_step}"
                 Path(outdir).mkdir(parents=True, exist_ok=True)
                 model.save_pretrained(outdir, params=params)
                 tokenizer.save_pretrained(outdir)
@@ -800,20 +800,20 @@ def main():
                         repo_type="model",
                         token=training_args.hub_token,
                     )
-        if jax.process_index() == 0:  # save
-            params = jax.device_get(unreplicate(state.params))
-            outdir = f"{training_args.output_dir}/epoch={epoch}"
-            Path(outdir).mkdir(parents=True, exist_ok=True)
-            model.save_pretrained(outdir, params=params)
-            tokenizer.save_pretrained(outdir)
-            if training_args.push_to_hub:
-                api.upload_folder(
-                    commit_message=f"Saving weights and logs of step {cur_step}",
-                    folder_path=outdir,
-                    repo_id=repo_id,
-                    repo_type="model",
-                    token=training_args.hub_token,
-                )
+    if jax.process_index() == 0:  # save
+        params = jax.device_get(unreplicate(state.params))
+        outdir = f"{training_args.output_dir}/epoch={epoch}"
+        Path(outdir).mkdir(parents=True, exist_ok=True)
+        model.save_pretrained(outdir, params=params)
+        tokenizer.save_pretrained(outdir)
+        if training_args.push_to_hub:
+            api.upload_folder(
+                commit_message=f"Saving weights and logs of step {cur_step}",
+                folder_path=outdir,
+                repo_id=repo_id,
+                repo_type="model",
+                token=training_args.hub_token,
+            )
     # Eval after training
     if training_args.do_eval:
         eval_metrics = []
