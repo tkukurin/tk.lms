@@ -295,8 +295,12 @@ def write_train_metric(summary_writer, train_metrics, train_time, step):
 
 
 def write_eval_metric(summary_writer, eval_metrics, step):
+    if hasattr(summary_writer, 'add_scalar'):
+        add = summary_writer.add_scalar
+    else:
+        add = summary_writer.scalar
     for metric_name, value in eval_metrics.items():
-        summary_writer.scalar(f"eval_{metric_name}", value, step)
+        add(f"eval_{metric_name}", value, step)
 
 
 def create_learning_rate_fn(
@@ -591,9 +595,12 @@ def main():
     has_tensorboard = is_tensorboard_available()
     if has_tensorboard and jax.process_index() == 0:
         try:
-            from flax.metrics.tensorboard import SummaryWriter
+            from tensorboardX import SummaryWriter
+            # requires tensor import ?!
+            # from flax.metrics.tensorboard import SummaryWriter
 
-            summary_writer = SummaryWriter(log_dir=Path(training_args.output_dir))
+            summary_writer = SummaryWriter(
+                log_dir=Path(training_args.output_dir))
         except ImportError as ie:
             has_tensorboard = False
             logger.warning(
@@ -601,8 +608,7 @@ def main():
             )
     else:
         logger.warning(
-            "Unable to display metrics through TensorBoard because the package is not installed: "
-            "Please run pip install tensorboard to enable."
+            "Please run `pip install tensorboardx`."
         )
 
     rng = jax.random.PRNGKey(training_args.seed)
@@ -776,25 +782,38 @@ def main():
                 )
                 epochs.write(desc)
                 epochs.desc = desc
-
-                # Save metrics
                 if has_tensorboard and jax.process_index() == 0:
-                    write_eval_metric(summary_writer, eval_metrics, cur_step)
+                    write_eval_metric(
+                        summary_writer, eval_metrics, cur_step)
 
-            if cur_step % training_args.save_steps == 0 and cur_step > 0:
-                # save checkpoint after each epoch and push checkpoint to the hub
-                if jax.process_index() == 0:
-                    params = jax.device_get(unreplicate(state.params))
-                    model.save_pretrained(training_args.output_dir, params=params)
-                    tokenizer.save_pretrained(training_args.output_dir)
-                    if training_args.push_to_hub:
-                        api.upload_folder(
-                            commit_message=f"Saving weights and logs of step {cur_step}",
-                            folder_path=training_args.output_dir,
-                            repo_id=repo_id,
-                            repo_type="model",
-                            token=training_args.hub_token,
-                        )
+            if cur_step % training_args.save_steps == 0 and cur_step > 0 and jax.process_index() == 0:
+                params = jax.device_get(unreplicate(state.params))
+                outdir = f"{training_args.output_dir}/epoch={epoch}"
+                Path(outdir).mkdir(parents=True, exist_ok=True)
+                model.save_pretrained(outdir, params=params)
+                tokenizer.save_pretrained(outdir)
+                if training_args.push_to_hub:
+                    api.upload_folder(
+                        commit_message=f"Saving weights and logs of step {cur_step}",
+                        folder_path=outdir,
+                        repo_id=repo_id,
+                        repo_type="model",
+                        token=training_args.hub_token,
+                    )
+        if jax.process_index() == 0:  # save
+            params = jax.device_get(unreplicate(state.params))
+            outdir = f"{training_args.output_dir}/epoch={epoch}"
+            Path(outdir).mkdir(parents=True, exist_ok=True)
+            model.save_pretrained(outdir, params=params)
+            tokenizer.save_pretrained(outdir)
+            if training_args.push_to_hub:
+                api.upload_folder(
+                    commit_message=f"Saving weights and logs of step {cur_step}",
+                    folder_path=outdir,
+                    repo_id=repo_id,
+                    repo_type="model",
+                    token=training_args.hub_token,
+                )
     # Eval after training
     if training_args.do_eval:
         eval_metrics = []
@@ -818,7 +837,8 @@ def main():
             eval_metrics["perplexity"] = float("inf")
 
         if jax.process_index() == 0:
-            Path(training_args.output_dir).mkdir(parents=True, exist_ok=True)
+            Path(training_args.output_dir).mkdir(
+                parents=True, exist_ok=True)
             eval_metrics = {f"eval_{metric_name}": value for metric_name, value in eval_metrics.items()}
             path = os.path.join(training_args.output_dir, "eval_results.json")
             with open(path, "w") as f:
