@@ -285,13 +285,16 @@ def data_loader(rng: jax.random.PRNGKey, dataset: Dataset, batch_size: int, shuf
 
 
 def write_train_metric(summary_writer, train_metrics, train_time, step):
-    summary_writer.scalar("train_time", train_time, step)
-
+    if hasattr(summary_writer, 'add_scalar'):
+        add = summary_writer.add_scalar
+    else:
+        add = summary_writer.scalar
+    add("train_time", train_time, step)
     train_metrics = get_metrics(train_metrics)
     for key, vals in train_metrics.items():
         tag = f"train_{key}"
         for i, val in enumerate(vals):
-            summary_writer.scalar(tag, val, step - len(vals) + i + 1)
+            add(tag, val, step - len(vals) + i + 1)
 
 
 def write_eval_metric(summary_writer, eval_metrics, step):
@@ -614,6 +617,11 @@ def main():
     rng = jax.random.PRNGKey(training_args.seed)
     rng, dropout_rng = jax.random.split(rng)
 
+    start_epoch = 0
+    if 'epoch' in model_args.model_name_or_path:
+        import re
+        start_epoch = 1 + int(re.search(r'epoch=(\d+)', model_args.model_name_or_path)[1])
+        logger.info(f'Found existing run, setting epoch={start_epoch}')
     num_epochs = int(training_args.num_train_epochs)
     train_batch_size = int(training_args.per_device_train_batch_size) * jax.device_count()
     per_device_eval_batch_size = int(training_args.per_device_eval_batch_size)
@@ -721,7 +729,7 @@ def main():
 
     train_time = 0
     train_metrics = []
-    epochs = tqdm(range(num_epochs), desc="Epoch ... ", position=0)
+    epochs = tqdm(range(start_epoch, start_epoch + num_epochs), desc="Epoch ... ", position=0)
 
     steps_per_epoch = len(train_dataset) // train_batch_size
     if training_args.eval_steps is None:
