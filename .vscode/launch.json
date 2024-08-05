@@ -1,0 +1,61 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File with Arguments",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "${command:pickArgs}"
+            ]
+        },
+        {
+            "name": "train",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/tk/train_hf.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--train_file", "data/train_one_doubledigit.csv",
+                "--validation_file", "data/valid_one_doubledigit.csv",
+                "--output_dir", "data/outputs/summing_train/",
+                "--config_name", "data/outputs/summing",
+                "--tokenizer_name", "data/outputs/summing",
+                "--model_name_or_path", "data/outputs/summing",
+                //"--model_name_or_path", "gpt2",
+                "--num_train_epochs", "50",
+                "--do_train", "--do_eval",
+                "--overwrite_output_dir",
+                // "--pad_instead_of_concat",
+                "--block_size", "8",
+                "--per_device_train_batch_size", "8",
+                "--per_device_eval_batch_size", "8",
+            ]
+        },
+        {
+            "name": "[demo] train",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/tk/train_hf.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset_name", "roneneldan/TinyStories",
+                //"--dataset_config_name", "generation",
+                "--output_dir", "data/outputs/demo/",
+                "--model_name_or_path", "gpt2",
+                "--do_train", "--do_eval",
+                "--overwrite_output_dir",
+                "--max_train_samples", "128",
+                "--max_eval_samples", "64",
+                "--block_size", "32",
+                "--per_device_train_batch_size", "8",
+                "--per_device_eval_batch_size", "8",
+            ]
+        }
+    ]
+}
