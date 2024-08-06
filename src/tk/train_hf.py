@@ -307,12 +307,19 @@ def write_eval_metric(summary_writer, eval_metrics, step):
 
 
 def create_learning_rate_fn(
-    train_ds_size: int, train_batch_size: int, num_train_epochs: int, num_warmup_steps: int, learning_rate: float
+    train_ds_size: int, 
+    train_batch_size: int, 
+    num_train_epochs: int, 
+    num_warmup_steps: int,
+    learning_rate: float
 ) -> Callable[[int], jnp.ndarray]:
     """Returns a linear warmup, linear_decay learning rate function."""
     steps_per_epoch = train_ds_size // train_batch_size
     num_train_steps = steps_per_epoch * num_train_epochs
-    warmup_fn = optax.linear_schedule(init_value=0.0, end_value=learning_rate, transition_steps=num_warmup_steps)
+    warmup_fn = optax.linear_schedule(
+        init_value=0.0,
+        end_value=learning_rate,
+        transition_steps=num_warmup_steps)
     decay_fn = optax.linear_schedule(
         init_value=learning_rate, end_value=0, transition_steps=num_train_steps - num_warmup_steps
     )
@@ -324,13 +331,9 @@ def main():
     parser = HfArgumentParser(
         (ModelArguments, DataTrainingArguments, TrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        # If we pass only one argument to the script and it's the path to a json file,
-        # let's parse it to get our arguments.
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-
-    send_example_telemetry("run_clm", model_args, data_args, framework="flax")
 
     if (
         os.path.exists(training_args.output_dir)
@@ -505,6 +508,8 @@ def main():
             trust_remote_code=model_args.trust_remote_code,
         )
 
+    logger.info(f"Instantiated model:\n{model}")
+
     if training_args.do_train:
         column_names = dataset["train"].column_names
     else:
@@ -618,7 +623,7 @@ def main():
     rng, dropout_rng = jax.random.split(rng)
 
     start_epoch = 0
-    if 'epoch' in model_args.model_name_or_path:
+    if 'epoch' in (model_args.model_name_or_path or ''):
         import re
         start_epoch = 1 + int(re.search(r'epoch=(\d+)', model_args.model_name_or_path)[1])
         logger.info(f'Found existing run, setting epoch={start_epoch}')
@@ -652,13 +657,16 @@ def main():
             for layer in flat_params.keys()
             if layer_norm_name in "".join(layer).lower()
         }
-        flat_mask = {path: (path[-1] != "bias" and path[-2:] not in layer_norm_named_params) for path in flat_params}
+        flat_mask = {
+            path: (
+                path[-1] != "bias" 
+                and path[-2:] not in layer_norm_named_params)
+            for path in flat_params
+        }
         return traverse_util.unflatten_dict(flat_mask)
 
     # create adam optimizer
     if training_args.adafactor:
-        # We use the default parameters here to initialize adafactor,
-        # For more details about the parameters please check https://github.com/deepmind/optax/blob/ed02befef9bf81cbbf236be3d2b0e032e9ed4a40/optax/_src/alias.py#L74
         optimizer = optax.adafactor(
             learning_rate=linear_decay_lr_schedule_fn,
         )
@@ -672,7 +680,6 @@ def main():
             mask=decay_mask_fn,
         )
 
-    # Setup train state
     state = TrainState.create(apply_fn=model.__call__, params=model.params, tx=optimizer, dropout_rng=dropout_rng)
 
     def loss_fn(logits, labels):
@@ -681,7 +688,6 @@ def main():
         loss = optax.softmax_cross_entropy(shift_logits, onehot(shift_labels, shift_logits.shape[-1]))
         return loss.mean()
 
-    # Define gradient update step fn
     def train_step(state, batch):
         dropout_rng, new_dropout_rng = jax.random.split(state.dropout_rng)
 
@@ -702,13 +708,11 @@ def main():
 
         return new_state, metrics
 
-    # Define eval fn
     def eval_step(params, batch):
         labels = batch.pop("labels")
         logits = model(**batch, params=params, train=False)[0]
         loss = loss_fn(logits, labels)
 
-        # summarize metrics
         metrics = {"loss": loss}
         metrics = jax.lax.pmean(metrics, axis_name="batch")
         return metrics
