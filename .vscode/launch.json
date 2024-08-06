@@ -23,16 +23,16 @@
             "args": [
                 "--train_file", "data/train_one_doubledigit.csv",
                 "--validation_file", "data/valid_one_doubledigit.csv",
-                "--output_dir", "data/outputs/summing_train/",
-                // "--config_name", "data/outputs/summing",
-                // "--tokenizer_name", "data/outputs/summing",
+                "--output_dir", "data/outputs/summing_train_2/",
+                "--config_name", "data/outputs/summing",
+                "--tokenizer_name", "data/outputs/summing",
                 // "--model_name_or_path", "data/outputs/summing",
 
                 // TODO(tk) howto add some nicer way to pick epoch?
-                "--model_name_or_path", "data/outputs/summing_train/epoch=${command:pickArgs}",
+                //"--model_name_or_path", "data/outputs/summing_train/epoch=${command:pickArgs}",
 
                 //"--model_name_or_path", "gpt2",
-                "--num_train_epochs", "50",
+                "--num_train_epochs", "2500",
                 "--do_train", "--do_eval",
                 "--overwrite_output_dir",
                 // "--pad_instead_of_concat",
