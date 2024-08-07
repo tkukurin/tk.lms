@@ -1,5 +1,16 @@
 """Pre-training/Fine-tuning causal language modeling.
 
+I prefer using Hydra:
+```bash
+python src/tk/train_hf.py \
+    +data.train_file=data/train_one_doubledigit.csv \
+    +data.validation_file=data/valid_one_doubledigit.csv \
+    +train.per_device_train_batch_size=8 \
+    +train.per_device_eval_batch_size=8 \
+    #
+```
+
+Old syntax:
 ```bash
 python src/tk/train_hf.py \
         --train_file data/train_one_doubledigit.csv \
@@ -14,11 +25,14 @@ python src/tk/train_hf.py \
 [based on]: https://github.com/huggingface/transformers/blob/main/examples/flax/language-modeling/run_clm_flax.py
 [ckpts]: https://huggingface.co/models?filter=text-generation
 """
+import hydra
+from omegaconf import DictConfig
+
 import json
-import logging
+import sys
+from loguru import logger
 import math
 import os
-import sys
 import time
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -46,15 +60,10 @@ from transformers import (
     AutoConfig,
     AutoTokenizer,
     FlaxAutoModelForCausalLM,
-    HfArgumentParser,
     is_tensorboard_available,
     set_seed,
 )
 from transformers.testing_utils import CaptureLogger
-from transformers.utils import send_example_telemetry
-
-
-logger = logging.getLogger(__name__)
 
 MODEL_CONFIG_CLASSES = list(FLAX_MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -62,8 +71,12 @@ MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 @dataclass
 class TrainingArguments:
-    output_dir: str = field(
-        metadata={"help": "The output directory where the model predictions and checkpoints will be written."},
+    output_dir: None | str = field(
+        default=None,
+        metadata={"help": (
+            "The output directory where the model predictions and checkpoints will be written. "
+            "If unset, we'll use `cwd()` (NB, Hydra sets this to a version-controlled directory!)"
+        )},
     )
     overwrite_output_dir: bool = field(
         default=False,
@@ -177,6 +190,9 @@ class ModelArguments:
             )
         },
     )
+    kwargs: dict = field(default_factory=dict, metadata={
+        "help": "passed to autoconfig"
+    })
 
 
 @dataclass
@@ -327,48 +343,51 @@ def create_learning_rate_fn(
     return schedule_fn
 
 
-def main():
-    parser = HfArgumentParser(
-        (ModelArguments, DataTrainingArguments, TrainingArguments))
-    if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
-    else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+def init(o, kls):
+    def _name(klass):
+        module = klass.__module__
+        if module == 'builtins':
+            return klass.__qualname__ # avoid outputs like 'builtins.str'
+        return module + '.' + klass.__qualname__
+    return hydra.utils.instantiate(o, _target_=_name(kls))
 
-    if (
-        os.path.exists(training_args.output_dir)
-        and os.listdir(training_args.output_dir)
-        and training_args.do_train
-        and not training_args.overwrite_output_dir
-    ):
-        raise ValueError(
-            f"Output directory ({training_args.output_dir}) already exists and is not empty. "
-            "Use --overwrite_output_dir to overcome."
-        )
 
-    # Make one log on every process with the configuration for debugging.
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO,
-    )
-    # log: one process per machine logs things on the screen.
-    logger.setLevel(logging.INFO if jax.process_index() == 0 else logging.ERROR)
+@hydra.main(
+    version_base="1.3", 
+    config_path="configs", 
+    config_name="train.yaml")
+def main(cfg: DictConfig):
+    model_args: ModelArguments = init(cfg.get('model', {}), ModelArguments)
+    data_args: DataTrainingArguments = init(cfg.get('data', {}), DataTrainingArguments)
+    training_args: TrainingArguments = init(cfg.get('train', {}), TrainingArguments)
+
+    orig_cwd = Path(hydra.utils.get_original_cwd())
+    output_dir = training_args.output_dir or os.getcwd()
+    logger.info(f"Working dir: {output_dir}")
+    logger.info(f"Original dir: {orig_cwd}")
+
+    # HACK: usually we want to load relative to original cwd
+    # but save relative to the versioned output dir
+    # => we revert back before training
+    os.chdir(orig_cwd)
+
     if jax.process_index() == 0:
         datasets.utils.logging.set_verbosity_warning()
         transformers.utils.logging.set_verbosity_info()
     else:
         datasets.utils.logging.set_verbosity_error()
         transformers.utils.logging.set_verbosity_error()
+        logger.remove()  # TODO not sure if this works...
+        logger.add(sys.stderr, level="ERROR")
 
-    logger.info(f"Training/evaluation parameters {training_args}")
+    logger.info(f"Training/evaluation parameters\n{training_args}")
 
     set_seed(training_args.seed)
 
     if training_args.push_to_hub:
         repo_name = training_args.hub_model_id
         if repo_name is None:
-            repo_name = Path(training_args.output_dir).absolute().name
+            repo_name = Path(output_dir).absolute().name
         api = HfApi()
         repo_id = api.create_repo(repo_name, exist_ok=True, token=training_args.hub_token).repo_id
 
@@ -457,6 +476,7 @@ def main():
             cache_dir=model_args.cache_dir,
             token=model_args.token,
             trust_remote_code=model_args.trust_remote_code,
+            **model_args.kwargs,
         )
     elif model_args.model_name_or_path:
         config = AutoConfig.from_pretrained(
@@ -464,6 +484,7 @@ def main():
             cache_dir=model_args.cache_dir,
             token=model_args.token,
             trust_remote_code=model_args.trust_remote_code,
+            **model_args.kwargs,
         )
     else:
         config = CONFIG_MAPPING[model_args.model_type]()
@@ -509,6 +530,7 @@ def main():
         )
 
     logger.info(f"Instantiated model:\n{model}")
+    logger.info(f"Instantiated config:\n{config}")
 
     if training_args.do_train:
         column_names = dataset["train"].column_names
@@ -568,11 +590,6 @@ def main():
         result["labels"] = result["input_ids"].copy()
         return result
 
-    # Note that with `batched=True`, this map processes 1,000 texts together, so group_texts throws away a remainder
-    # for each of those groups of 1,000 texts. You can adjust that batch_size here but a higher value might be slower
-    # to preprocess.
-    #
-    # To speed up this part, we use multiprocessing. See the documentation of the map method for more information:
     # https://huggingface.co/docs/datasets/process#map
 
     lm_datasets = tokenized_datasets.map(
@@ -604,11 +621,11 @@ def main():
     if has_tensorboard and jax.process_index() == 0:
         try:
             from tensorboardX import SummaryWriter
-            # requires tensor import ?!
+            # requires tensorflow import ?!
             # from flax.metrics.tensorboard import SummaryWriter
 
             summary_writer = SummaryWriter(
-                log_dir=Path(training_args.output_dir))
+                log_dir=Path(output_dir))
         except ImportError as ie:
             has_tensorboard = False
             logger.warning(
@@ -643,13 +660,8 @@ def main():
         training_args.learning_rate,
     )
 
-    # We use Optax's "masking" functionality to not apply weight decay
-    # to bias and LayerNorm scale parameters. decay_mask_fn returns a
-    # mask boolean with the same structure as the parameters.
-    # The mask is True for parameters that should be decayed.
     def decay_mask_fn(params):
         flat_params = traverse_util.flatten_dict(params)
-        # find out all LayerNorm parameters
         layer_norm_candidates = ["layernorm", "layer_norm", "ln"]
         layer_norm_named_params = {
             layer[-2:]
@@ -658,14 +670,13 @@ def main():
             if layer_norm_name in "".join(layer).lower()
         }
         flat_mask = {
-            path: (
+            path: (  # True if param _should_ be decayed
                 path[-1] != "bias" 
                 and path[-2:] not in layer_norm_named_params)
             for path in flat_params
         }
         return traverse_util.unflatten_dict(flat_mask)
 
-    # create adam optimizer
     if training_args.adafactor:
         optimizer = optax.adafactor(
             learning_rate=linear_decay_lr_schedule_fn,
@@ -680,7 +691,11 @@ def main():
             mask=decay_mask_fn,
         )
 
-    state = TrainState.create(apply_fn=model.__call__, params=model.params, tx=optimizer, dropout_rng=dropout_rng)
+    state = TrainState.create(
+        apply_fn=model.__call__,
+        params=model.params,
+        tx=optimizer,
+        dropout_rng=dropout_rng)
 
     def loss_fn(logits, labels):
         shift_logits = logits[..., :-1, :]
@@ -739,6 +754,7 @@ def main():
     if training_args.eval_steps is None:
         training_args.eval_steps = steps_per_epoch
 
+    os.chdir(output_dir)
     for epoch in epochs:
         train_start = time.time()
 
@@ -800,7 +816,7 @@ def main():
 
             if cur_step % training_args.save_steps == 0 and cur_step > 0 and jax.process_index() == 0:
                 params = jax.device_get(unreplicate(state.params))
-                outdir = f"{training_args.output_dir}/step={cur_step}"
+                outdir = f"{output_dir}/step={cur_step}"
                 Path(outdir).mkdir(parents=True, exist_ok=True)
                 model.save_pretrained(outdir, params=params)
                 tokenizer.save_pretrained(outdir)
@@ -814,7 +830,7 @@ def main():
                     )
     if jax.process_index() == 0:  # save
         params = jax.device_get(unreplicate(state.params))
-        outdir = f"{training_args.output_dir}/epoch={epoch}"
+        outdir = f"{output_dir}/epoch={epoch}"
         Path(outdir).mkdir(parents=True, exist_ok=True)
         model.save_pretrained(outdir, params=params)
         tokenizer.save_pretrained(outdir)
@@ -849,10 +865,10 @@ def main():
             eval_metrics["perplexity"] = float("inf")
 
         if jax.process_index() == 0:
-            Path(training_args.output_dir).mkdir(
+            Path(output_dir).mkdir(
                 parents=True, exist_ok=True)
             eval_metrics = {f"eval_{metric_name}": value for metric_name, value in eval_metrics.items()}
-            path = os.path.join(training_args.output_dir, "eval_results.json")
+            path = os.path.join(output_dir, "eval_results.json")
             with open(path, "w") as f:
                 json.dump(eval_metrics, f, indent=4, sort_keys=True)
 

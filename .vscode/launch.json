@@ -21,24 +21,37 @@
             "program": "${workspaceFolder}/src/tk/train_hf.py",
             "console": "integratedTerminal",
             "args": [
-                "--train_file", "data/train_one_doubledigit.csv",
-                "--validation_file", "data/valid_one_doubledigit.csv",
-                "--output_dir", "data/outputs/summing_train_2/",
-                "--config_name", "data/outputs/summing",
-                "--tokenizer_name", "data/outputs/summing",
-                // "--model_name_or_path", "data/outputs/summing",
+                "+data.train_file=data/train_one_doubledigit.csv",
+                "+data.validation_file=data/valid_one_doubledigit.csv",
+                "+data.block_size=8",
 
-                // TODO(tk) howto add some nicer way to pick epoch?
-                //"--model_name_or_path", "data/outputs/summing_train/epoch=${command:pickArgs}",
+                "+train.per_device_train_batch_size=8",
+                "+train.per_device_eval_batch_size=8",
+                "+train.num_train_epochs=1500",
+                "+train.do_train=true",
+                "+train.do_eval=true",
 
-                //"--model_name_or_path", "gpt2",
-                "--num_train_epochs", "2500",
-                "--do_train", "--do_eval",
-                "--overwrite_output_dir",
-                // "--pad_instead_of_concat",
-                "--block_size", "8",
-                "--per_device_train_batch_size", "8",
-                "--per_device_eval_batch_size", "8",
+                "+model.config_name=data/outputs/summing",
+                "+model.tokenizer_name=data/outputs/summing",
+
+                // "--train_file", "data/train_one_doubledigit.csv",
+                // "--validation_file", "data/valid_one_doubledigit.csv",
+                // "--output_dir", "data/outputs/summing_train_2/",
+                // "--config_name", "data/outputs/summing",
+                // "--tokenizer_name", "data/outputs/summing",
+                // // "--model_name_or_path", "data/outputs/summing",
+
+                // // TODO(tk) howto add some nicer way to pick epoch?
+                // //"--model_name_or_path", "data/outputs/summing_train/epoch=${command:pickArgs}",
+
+                // //"--model_name_or_path", "gpt2",
+                // "--num_train_epochs", "2500",
+                // "--do_train", "--do_eval",
+                // "--overwrite_output_dir",
+                // // "--pad_instead_of_concat",
+                // "--block_size", "8",
+                // "--per_device_train_batch_size", "8",
+                // "--per_device_eval_batch_size", "8",
             ]
         },
         {
