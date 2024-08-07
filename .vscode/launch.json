@@ -15,7 +15,7 @@
             ]
         },
         {
-            "name": "train",
+            "name": "[multirun] train",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/src/tk/train_hf.py",
@@ -37,6 +37,32 @@
                 "+train.per_device_train_batch_size=8",
                 "+train.per_device_eval_batch_size=8",
                 "+train.num_train_epochs=750",
+                "+train.do_train=true",
+                "+train.do_eval=true",
+
+                "+model.config_name=data/outputs/prepro_hf/${input:preproDir}",
+                "+model.tokenizer_name=data/outputs/prepro_hf/${input:preproDir}",
+            ]
+        },
+        {
+            "name": "[singlerun] train",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/tk/train_hf.py",
+            "console": "integratedTerminal",
+            "args": [
+                "+data.train_file=data/outputs/prepro_hf/${input:preproDir}/train_one_doubledigit.csv",
+                "+data.validation_file=data/outputs/prepro_hf/${input:preproDir}/valid_one_doubledigit.csv",
+                "+data.block_size=8",
+                
+                "model.kwargs.n_layer=12",
+                "model.kwargs.n_head=8",
+                "model.kwargs.n_embd=256",
+                "model.kwargs.max_len=16",
+
+                "+train.per_device_train_batch_size=8",
+                "+train.per_device_eval_batch_size=8",
+                "+train.num_train_epochs=1500",
                 "+train.do_train=true",
                 "+train.do_eval=true",
 
