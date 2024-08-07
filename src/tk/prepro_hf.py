@@ -69,12 +69,14 @@ def main(cfg: Cfg):
         # NOTE(tk) explicitly set to invalid number
         # we expect to override these values
         # during experiment training time (train_hf.py)
+        vocab_size=0,
         n_layer=0,
         n_head=0,
         n_embd=0,
     )
+    config, tokenizer = mktokenizer(tok_data, config)
+    tokenizer.save_pretrained(f"{model_dir}")
     config.save_pretrained(f"{model_dir}")
-    config, tokenizer = mktokenizer(tok_data, model_dir)
     logger.info(tokenizer("1+1=2"))
     return config, tokenizer
 
