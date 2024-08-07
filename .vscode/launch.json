@@ -56,8 +56,8 @@
                 "+data.block_size=8",
                 
                 "model.kwargs.n_layer=12",
-                "model.kwargs.n_head=8",
-                "model.kwargs.n_embd=256",
+                "model.kwargs.n_head=4",
+                "model.kwargs.n_embd=32",
                 "model.kwargs.max_len=16",
 
                 "+train.per_device_train_batch_size=8",
@@ -76,9 +76,10 @@
           "id": "preproDir",
           "description": "Which dir in preprocess to use for data loading.",
           "type": "pickString",
-          "default": "0807_1941",
+          "default": "0807_2117",
           "options": [
             "0807_1941",
+            "0807_2117",
           ]
         }
     ],
