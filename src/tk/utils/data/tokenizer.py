@@ -1,5 +1,6 @@
 import transformers
 import tokenizers.implementations as toklib
+import tempfile
 
 from loguru import logger
 from typing import Iterable
@@ -41,24 +42,21 @@ def mktokenizer_base(data, special_tokens: set = set(special_tokens.values())) -
     return tokenizer
 
 
-def mktokenizer(data, config_dir, max_len=512, special_tokens: dict = special_tokens):
+def mktokenizer(data, config, max_len=512, special_tokens: dict = special_tokens):
     tokenizer = mktokenizer_base(data, set(special_tokens.values()))
-    tokenizer.save(f"{config_dir}/tokenizer.json")
-    tokenizer = transformers.AutoTokenizer.from_pretrained(
-        f"{config_dir}",
-        model_max_length=max_len,
-        vocab_size=tokenizer.get_vocab_size(),
-        # bos_token_id=tokenizer.bos_token_id,
-        # eos_token_id=tokenizer.eos_token_id,
-        **special_tokens
-    )
-    config = transformers.AutoConfig.from_pretrained(f"{config_dir}")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config.save_pretrained(tmpdir)
+        tokenizer.save(f"{tmpdir}/tokenizer.json")
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            f"{tmpdir}",
+            model_max_length=max_len,
+            vocab_size=tokenizer.get_vocab_size(),
+            **special_tokens
+        )
+        config = transformers.AutoConfig.from_pretrained(f"{tmpdir}")
+    config.vocab_size = tokenizer.vocab_size
     config.bos_token_id = tokenizer.bos_token_id
     config.eos_token_id = tokenizer.eos_token_id
-
-    config.save_pretrained(f"{config_dir}")
-    tokenizer.save_pretrained(f"{config_dir}")
-
     logger.info(f"{tokenizer.model_max_length=}")
     logger.info(f"{tokenizer.vocab=}")
     logger.info(f"{tokenizer.special_tokens_map=}")
