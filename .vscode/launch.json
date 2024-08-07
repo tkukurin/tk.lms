@@ -21,58 +21,39 @@
             "program": "${workspaceFolder}/src/tk/train_hf.py",
             "console": "integratedTerminal",
             "args": [
-                "+data.train_file=data/train_one_doubledigit.csv",
-                "+data.validation_file=data/valid_one_doubledigit.csv",
+                // various options for multirun
+                // https://hydra.cc/docs/tutorials/basic/running_your_app/multi-run/
+                "--multirun",
+
+                "+data.train_file=data/outputs/prepro_hf/${input:preproDir}/train_one_doubledigit.csv",
+                "+data.validation_file=data/outputs/prepro_hf/${input:preproDir}/valid_one_doubledigit.csv",
                 "+data.block_size=8",
+                
+                "model.kwargs.n_layer=4,8",
+                "model.kwargs.n_head=4,8",
+                "model.kwargs.n_embd=32,64",
+                "model.kwargs.max_len=16",
 
                 "+train.per_device_train_batch_size=8",
                 "+train.per_device_eval_batch_size=8",
-                "+train.num_train_epochs=1500",
+                "+train.num_train_epochs=750",
                 "+train.do_train=true",
                 "+train.do_eval=true",
 
-                "+model.config_name=data/outputs/summing",
-                "+model.tokenizer_name=data/outputs/summing",
-
-                // "--train_file", "data/train_one_doubledigit.csv",
-                // "--validation_file", "data/valid_one_doubledigit.csv",
-                // "--output_dir", "data/outputs/summing_train_2/",
-                // "--config_name", "data/outputs/summing",
-                // "--tokenizer_name", "data/outputs/summing",
-                // // "--model_name_or_path", "data/outputs/summing",
-
-                // // TODO(tk) howto add some nicer way to pick epoch?
-                // //"--model_name_or_path", "data/outputs/summing_train/epoch=${command:pickArgs}",
-
-                // //"--model_name_or_path", "gpt2",
-                // "--num_train_epochs", "2500",
-                // "--do_train", "--do_eval",
-                // "--overwrite_output_dir",
-                // // "--pad_instead_of_concat",
-                // "--block_size", "8",
-                // "--per_device_train_batch_size", "8",
-                // "--per_device_eval_batch_size", "8",
+                "+model.config_name=data/outputs/prepro_hf/${input:preproDir}",
+                "+model.tokenizer_name=data/outputs/prepro_hf/${input:preproDir}",
             ]
         },
+    ],
+    "inputs": [
         {
-            "name": "[demo] train",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/src/tk/train_hf.py",
-            "console": "integratedTerminal",
-            "args": [
-                "--dataset_name", "roneneldan/TinyStories",
-                //"--dataset_config_name", "generation",
-                "--output_dir", "data/outputs/demo/",
-                "--model_name_or_path", "gpt2",
-                "--do_train", "--do_eval",
-                "--overwrite_output_dir",
-                "--max_train_samples", "128",
-                "--max_eval_samples", "64",
-                "--block_size", "32",
-                "--per_device_train_batch_size", "8",
-                "--per_device_eval_batch_size", "8",
-            ]
+          "id": "preproDir",
+          "description": "Which dir in preprocess to use for data loading.",
+          "type": "pickString",
+          "default": "0807_1941",
+          "options": [
+            "0807_1941",
+          ]
         }
-    ]
+    ],
 }
