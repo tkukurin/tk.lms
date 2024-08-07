@@ -4,7 +4,9 @@ job:
   chdir: true
 run:
   dir: data/outputs/${hydra.job.name}/${now:%m%d_%H%M}
-
+sweep:
+  dir: data/outputs/${hydra.job.name}/multiruns/${now:%m%d}_${now:%H%M}
+  subdir: ${hydra.job.num}
     
 # lit setup
 # enable color logging
