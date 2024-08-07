@@ -5,13 +5,9 @@
 """
 # %%
 from dataclasses import dataclass
-from transformers import GPT2Config, FlaxGPT2LMHeadModel
+from transformers import GPT2Config
 import tk
-from datasets import load_dataset
-from transformers import AutoTokenizer
-import tokenizers.implementations as toklib
 from pathlib import Path
-from transformers import AutoConfig
 
 import csv
 import tk
@@ -39,8 +35,6 @@ def mkdata(outdir: None | Path = None):
     kind, traini, testi = split()
     train = [(i, f"{ops_fmt[i]}") for i in traini]
     test = [(i, f"{ops_fmt[i]}") for i in testi]
-    # train = [(i, f"{bos_token}{ops_fmt[i]}{eos_token}") for i in traini]
-    # test = [(i, f"{bos_token}{ops_fmt[i]}{eos_token}") for i in testi]
     logger.info(f'{len(train)=}')
     logger.info(train[:2])
     logger.info(f'{len(test)=}')
@@ -64,10 +58,6 @@ def mkdata(outdir: None | Path = None):
 # %%
 @dataclass
 class Cfg:
-    # n_layer: int = 4
-    # n_head: int = 4
-    # n_embd: int = 16
-    # max_len: int = 16
     output_dir: str = "."
 
 
@@ -85,13 +75,6 @@ def main(cfg: Cfg):
     )
     config.save_pretrained(f"{model_dir}")
     config, tokenizer = mktokenizer(tok_data, model_dir)
-    # logger.info(vocab := tokenizer.get_vocab())
-    # vocab_size = len(vocab)
-    # model = FlaxGPT2LMHeadModel(
-    #     config,
-    #     input_shape=(cfg.max_len, vocab_size)
-    # )
-    # tokenizer.save(f"{model_dir}/tokenizer.json")
     logger.info(tokenizer("1+1=2"))
     return config, tokenizer
 
