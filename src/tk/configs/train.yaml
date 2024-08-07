@@ -1,0 +1,12 @@
+
+defaults:
+  - _self_
+  - hydra: default
+  
+model:
+  kwargs:
+    n_layer: 4
+    n_head: 4
+    n_embd: 32
+    max_len: 16
+    

@@ -4,6 +4,8 @@
 [train]: train_hf.py
 """
 # %%
+from dataclasses import dataclass
+from transformers import GPT2Config, FlaxGPT2LMHeadModel
 import tk
 from datasets import load_dataset
 from transformers import AutoTokenizer
@@ -15,153 +17,100 @@ import csv
 import tk
 import numpy as np
 import itertools as it
-from typing import Iterable
 import numpy as np
-import jax.numpy as jnp
-from torch.utils.data import DataLoader
 from loguru import logger
-import transformers
 
-
-def make_vocab(texts: Iterable[str],):
-    vocab = {'<pad>': 0, '<eof>': 1}
-    for text in texts:
-        for char in text:
-            if char not in vocab:
-                vocab[char] = len(vocab)
-    return vocab
-
-
-max_len = 16
-nums = np.arange(10)
-ops = [a + b for a, b in it.product(nums, nums)]
-ops_fmt = [f"{a}+{b}={a+b}" for a, b in it.product(nums, nums)]
-vocab = make_vocab(ops_fmt)
-
-ops_tok = np.array(
-    [
-        [vocab[c]
-         for c in op] +
-        [vocab['<pad>']
-         for _ in range(max_len - len(op))]
-        for op in ops_fmt
-    ]
-)
-
-
-def split(kind: str = 'one_doubledigit'):
-    singles = {i for i, x in enumerate(ops) if x < 10}
-    doubles = {i for i, x in enumerate(ops) if x >= 10}
-    traini = singles | {i for i in doubles if ops[i] % 10 == 1}
-    testi = set(list(range(len(ops)))) - traini
-    return kind, traini, testi
-
-
-special_tokens = [
-    "<bof>",
-    "<eof>",
-    "<pad>",
-    "<unk>"
-]
-uniq = sorted(set(''.join(ops_fmt)))
-vocab = (
-    {k: i for i, k in enumerate(special_tokens + uniq)}
-)
-logger.info(f"{vocab}")
-kind, traini, testi = split()
-train = [(i, ops_fmt[i]) for i in traini]
-test = [(i, ops_fmt[i]) for i in testi]
-
-logger.info(f'{len(train)=}')
-logger.info(train[:2])
-logger.info(f'{len(test)=}')
-logger.info(test[:2])
-
-
-def batch_iterator(raw_dataset, batch_size=1000):
-    for i in range(0, len(raw_dataset), batch_size):
-        yield raw_dataset[i: i + batch_size]
-
-from transformers import GPT2Config, FlaxGPT2LMHeadModel
-
-(model_dir := tk.datadir / "outputs" / "summing").mkdir(
-    exist_ok=True, parents=True)
-logger.info(vocab_full := list(
-    set(special_tokens) 
-    | set(uniq)))
-tokenizer = toklib.CharBPETokenizer(
-    suffix="",
-)
-tokenizer.train_from_iterator(
-    [b for a, b in train],
-    vocab_size=len(vocab_full),
-    special_tokens=special_tokens,
-    suffix="",
-)
-
-# %%
-logger.info(tokenizer.get_vocab())
-config = GPT2Config(
-    vocab_size=len(vocab_full),
-    n_layer=4,
-    n_head=4,
-    n_embd=32,
-    bos_token_id=tokenizer.get_vocab()["<bof>"],
-    eos_token_id=tokenizer.get_vocab()["<eof>"],
-)
-model = FlaxGPT2LMHeadModel(
-    config,
-    input_shape=(max_len, len(vocab_full))
-)
-config.save_pretrained(f"{model_dir}")
-model.save_pretrained(f"{model_dir}")
-tokenizer.save(f"{model_dir}/tokenizer.json")
-
-# %%
-# NOTE(tk) not sure what's a better way to add explicit special tokens
-tokens = {
-    'eos_token': '<eof>',
-    'sep_token': '<eof>',
-    'pad_token': '<pad>',
-    'bos_token': '<bof>',
-    'unk_token': '<unk>',
-}
-tokenizer = transformers.AutoTokenizer.from_pretrained(
-    f"{model_dir}",
-    model_max_length=max_len,
-    **tokens
-)
-logger.info(f"{tokenizer.model_max_length=}")
-logger.info(f"{tokenizer.vocab=}")
-logger.info(f"{tokenizer.special_tokens_map=}")
-# %%
-tokenizer.save_pretrained(f"{model_dir}")
-
-chk = tokenizer(
-    train[0][1], 
-    padding="max_length", 
-    max_length=16)
-logger.info(f"CHK: {chk}")
+from tk.utils.data.tokenizer import mktokenizer
 
 # %%
 
-with open((name := tk.datadir / f"train_{kind}.csv"), "w") as f:
-    logger.info(f"Writing {name}")
-    writer = csv.writer(f)
-    writer.writerow(('i', 'text', ))
-    writer.writerows(
-        (i, f"{tokenizer.bos_token}{x}{tokenizer.eos_token}", ) for i, x in train
+def mkdata(outdir: None | Path = None):
+    nums = np.arange(10)
+    ops = [a + b for a, b in it.product(nums, nums)]
+    ops_fmt = [f"{a}+{b}={a+b}" for a, b in it.product(nums, nums)]
+
+    def split(kind: str = 'one_doubledigit'):
+        singles = {i for i, x in enumerate(ops) if x < 10}
+        doubles = {i for i, x in enumerate(ops) if x >= 10}
+        traini = singles | {i for i in doubles if ops[i] % 10 == 1}
+        testi = set(list(range(len(ops)))) - traini
+        return kind, traini, testi
+    
+    kind, traini, testi = split()
+    train = [(i, f"{ops_fmt[i]}") for i in traini]
+    test = [(i, f"{ops_fmt[i]}") for i in testi]
+    # train = [(i, f"{bos_token}{ops_fmt[i]}{eos_token}") for i in traini]
+    # test = [(i, f"{bos_token}{ops_fmt[i]}{eos_token}") for i in testi]
+    logger.info(f'{len(train)=}')
+    logger.info(train[:2])
+    logger.info(f'{len(test)=}')
+    logger.info(test[:2])
+
+    if outdir:
+        with open((name := outdir / f"train_{kind}.csv"), "w") as f:
+            logger.info(f"Writing {name}")
+            writer = csv.writer(f)
+            writer.writerow(('i', 'text', ))
+            writer.writerows(train)
+
+        with open((name := outdir / f"valid_{kind}.csv"), "w") as f:
+            logger.info(f"Writing {name}")
+            writer = csv.writer(f)
+            writer.writerow(('i', 'text', ))
+            writer.writerows(test)
+
+    return train, test
+
+# %%
+@dataclass
+class Cfg:
+    # n_layer: int = 4
+    # n_head: int = 4
+    # n_embd: int = 16
+    # max_len: int = 16
+    output_dir: str = "."
+
+
+def main(cfg: Cfg):
+    logger.info(model_dir := Path(cfg.output_dir))
+    train, test = mkdata(outdir=model_dir)
+    tok_data = [x for i, x in train]
+    config = GPT2Config(
+        # NOTE(tk) explicitly set to invalid number
+        # we expect to override these values
+        # during experiment training time (train_hf.py)
+        n_layer=0,
+        n_head=0,
+        n_embd=0,
     )
+    config.save_pretrained(f"{model_dir}")
+    config, tokenizer = mktokenizer(tok_data, model_dir)
+    # logger.info(vocab := tokenizer.get_vocab())
+    # vocab_size = len(vocab)
+    # model = FlaxGPT2LMHeadModel(
+    #     config,
+    #     input_shape=(cfg.max_len, vocab_size)
+    # )
+    # tokenizer.save(f"{model_dir}/tokenizer.json")
+    logger.info(tokenizer("1+1=2"))
+    return config, tokenizer
 
-with open((name := tk.datadir / f"valid_{kind}.csv"), "w") as f:
-    logger.info(f"Writing {name}")
-    writer = csv.writer(f)
-    writer.writerow(('i', 'text', ))
-    writer.writerows(
-        (i, f"{tokenizer.bos_token}{x}{tokenizer.eos_token}", ) for i, x in test
+
+if False:  # running as notebook ... 
+    output_dir = tk.datadir / "outputs" / "prepro/summing"
+    output_dir.mkdir(exist_ok=True, parents=True)
+    main(
+        Cfg(
+            output_dir=output_dir
+        )
     )
 
 # %%
-logger.info(tokenizer("1+1=2"))
+if __name__ == '__main__':
+    import hydra
 
-# %%
+    wrap = hydra.main(
+        version_base="1.3", 
+        config_path="configs", 
+        config_name="prepro.yaml")
+    wrap(main)()
