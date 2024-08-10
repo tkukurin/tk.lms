@@ -291,7 +291,8 @@ def exp1():
     logger.debug(x := jnp.array([a for a, b, c in tokens]))
     y = jnp.array([b for a, b, c in tokens])
     mask = jnp.array([c for a, b, c in tokens])
-    return x, y, mask
+    return tokens, x, y, mask
+
 
 def exp2():
     """loss counted only on the output token"""
@@ -306,18 +307,26 @@ def exp2():
     logger.debug(mask)
     return tokens, x, y, jnp.array(mask)
 
+
 stat_history = []
 model, state, rng = exp_common()
-exp_raw_x, exp_x, exp_y, exp_mask = exp2()
-
+rng, dkey = random.split(rng)
+exp_raw_x, exp_x, exp_y, exp_mask = exp1()
+# %%
+min_loss = -1, 9999
+lowest_loss_params = state.params
 # %%
 num_epochs = 25
-rng, dkey = random.split(rng)
-for epoch in range(num_epochs):
+cur_epoch = len(stat_history)
+for epoch in range(cur_epoch, cur_epoch + num_epochs):
     state, loss = train_step(
         exp_x, exp_y, exp_mask, state, dropout_key=rng)
     data = get_stats(state)
     data['loss'] = loss
+    if loss < min_loss[1]:
+        print('Saving @', loss)
+        lowest_loss_params = state.params.copy()
+        min_loss = (epoch, loss)
     stat_history.append(data)
     print(f"Epoch {epoch+1}, Loss: {loss:.4f}")
 
@@ -331,20 +340,24 @@ deltas_over_epochs = jax.tree.map(
 
 get_chart(deltas_over_epochs)
 # %%
+# params = state.params
+params = lowest_loss_params
 bound_model = model.bind(
-    {'params': state.params}, 
+    {'params': params}, 
     rngs={'dropout': rng})
 
 train_preds = bound_model(exp_x, train=False)
 print(train_preds.shape)
 # %%
 probs = nn.softmax(train_preds[:, -1])
+print('after', len(stat_history), 'epochs')
 # %%
 import treescope  # comes with penzai
 treescope.render_array(probs)
 # %%
 for i, x in enumerate(exp_raw_x):
-    print(x)
+    print(decode(x[0]))
     imx = jnp.argmax(probs[i]).item()
-    print(id2chr[imx], probs[i, imx], )
+    print(id2chr[imx], '::', probs[i, imx], )
+    print()
 # %%
