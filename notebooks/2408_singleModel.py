@@ -1,6 +1,9 @@
 """Quick model training dynamics script.
 """
 # %%
+try: from rich import print as show
+except: from IPython.display import display as show
+
 import flax.traceback_util
 import flax.traverse_util
 import flax.traverse_util
@@ -13,6 +16,9 @@ from flax.configurations import Config
 from jax import random
 import numpy as np
 from loguru import logger
+import penzai.pz
+import penzai.toolshed
+import penzai.treescope
 from tk.utils.data import tokenizer as toklib
 from tk.prepro_hf import mkdata
 from tk.models import gpt2
@@ -259,19 +265,57 @@ def diff(values: tuple[jnp.ndarray]):
     return deltas
 
 # %%
-print(diff([(1, 0), (2, 1)]))
+
+def exp_common():
+    state = create_train_state(
+        (rng := random.PRNGKey(42)),
+        (model := gpt2.GPT(gpt2.GPTConfig(
+            block_size=16,
+            vocab_size=len(id2chr),
+            num_embeds=128,
+            num_layers=4,
+            num_heads=4,
+            dropout_rate=0.1,
+            use_bias=True,
+        ))),
+        learning_rate=5e-5
+    )
+    return model, state, rng
+
+
+def exp1():
+    """standard autoregressive mask"""
+    tokens = [
+        labelize(*encode(x, maxlen=8)) for x in train_overfit
+    ]
+    logger.debug(x := jnp.array([a for a, b, c in tokens]))
+    y = jnp.array([b for a, b, c in tokens])
+    mask = jnp.array([c for a, b, c in tokens])
+    return x, y, mask
+
+def exp2():
+    """loss counted only on the output token"""
+    tokens = [
+        labelize(*encode(x, maxlen=8)) for x in train_overfit
+    ]
+    logger.debug(x := jnp.array([a for a, b, c in tokens]))
+    logger.debug(y := jnp.array([b for a, b, c in tokens]))
+    mask = np.zeros_like(y)
+    mask[:, 4] = 1
+    assert len(np.unique(y[:, 4])) > 1, f"wrong setup:\n{y}"
+    logger.debug(mask)
+    return tokens, x, y, jnp.array(mask)
+
+stat_history = []
+model, state, rng = exp_common()
+exp_raw_x, exp_x, exp_y, exp_mask = exp2()
 
 # %%
-tokens = [labelize(*encode(x, maxlen=16)) for x in train_overfit]
-logger.debug(x := jnp.array([a for a, b, c in tokens]))
-y = jnp.array([b for a, b, c in tokens])
-mask = jnp.array([c for a, b, c in tokens])
-data = get_stats(state)
-stat_history = [data]
-# %%
 num_epochs = 25
+rng, dkey = random.split(rng)
 for epoch in range(num_epochs):
-    state, loss = train_step(x, y, mask, state, dropout_key=rng)
+    state, loss = train_step(
+        exp_x, exp_y, exp_mask, state, dropout_key=rng)
     data = get_stats(state)
     data['loss'] = loss
     stat_history.append(data)
@@ -281,8 +325,26 @@ for epoch in range(num_epochs):
 import matplotlib.pyplot as plt
 plt.plot([x['loss'] for x in stat_history if 'loss' in x])
 # %%
-zipped = tree_zip(*(x['stats'] for x in stat_history))
+zipped = tree_zip(*(x['stats'] for x in stat_history[-5:]))
 deltas_over_epochs = jax.tree.map(
     diff, zipped, is_leaf=lambda x: isinstance(x, (tuple, list)))
 
 get_chart(deltas_over_epochs)
+# %%
+bound_model = model.bind(
+    {'params': state.params}, 
+    rngs={'dropout': rng})
+
+train_preds = bound_model(exp_x, train=False)
+print(train_preds.shape)
+# %%
+probs = nn.softmax(train_preds[:, -1])
+# %%
+import treescope  # comes with penzai
+treescope.render_array(probs)
+# %%
+for i, x in enumerate(exp_raw_x):
+    print(x)
+    imx = jnp.argmax(probs[i]).item()
+    print(id2chr[imx], probs[i, imx], )
+# %%
