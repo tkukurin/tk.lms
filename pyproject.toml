@@ -26,7 +26,7 @@ dependencies = [
     "loguru",
     "tokenizers",
     "hydra-core>=1.3.2,<2"
-]
+, "penzai>=0.2.1,<0.3"]
 
 [tool.pixi.project]
 channels = ["conda-forge"]
