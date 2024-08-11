@@ -313,32 +313,22 @@ model, state, rng = exp_common()
 rng, dkey = random.split(rng)
 exp_raw_x, exp_x, exp_y, exp_mask = exp1()
 # %%
-min_loss = -1, 9999
-lowest_loss_params = state.params
+min_loss = -1, 9999, state.params
+max_acc = -1, 0, state.params
 # %%
-def actual_metric(x, y, model, state):
-    yhat = model.apply(
-        {'params': state.params}, 
-        x[:, :5], 
-        train=False, 
-        rngs={'dropout': rng})
-    yhat = yhat.argmax(-1)[:, 4]
-    y = y[:, 4]
-    return (yhat == y).mean()
-
-actual_metric(exp_x, exp_y, model, state)
-# %%
-def metric_across(x, y, model, params):
+def eval_step(x, y, model, params):
     yhat = model.apply(
         {'params': params}, 
-        x[:, :5], 
+        x, 
         train=False, 
         rngs={'dropout': rng})
-    yhat = yhat.argmax(-1)[:, :5]
-    return (yhat == y[:, :5]).mean()
+    yhat = yhat.argmax(-1)
+    metrics = dict(
+        acc = (yhat[:, 4] == y[:, 4]).mean(),
+        acc_all = (yhat == y).mean()
+    )
+    return yhat, metrics
 
-print(metric_across(exp_x, exp_y, model, lowest_loss_params))
-# %%
 num_epochs = 25
 cur_epoch = len(stat_history)
 for epoch in range(cur_epoch, cur_epoch + num_epochs):
@@ -346,13 +336,17 @@ for epoch in range(cur_epoch, cur_epoch + num_epochs):
         exp_x, exp_y, exp_mask, state, dropout_key=rng)
     data = get_stats(state)
     data['loss'] = loss
-    data['acc'] = actual_metric(exp_x, exp_y, model, state)
+    yhat, metrics = eval_step(exp_x, exp_y, model, state.params)
+    data = {**data, **metrics}
     if loss < min_loss[1]:
-        print('Saving @', loss)
-        lowest_loss_params = state.params.copy()
-        min_loss = (epoch, loss)
+        print('Saving[loss]@', loss)
+        min_loss = (epoch, loss, state.params.copy())
+    if data['acc_all'] > max_acc[1]:
+        print('Saving[acca]@', data['acc_all'])
+        max_acc = (epoch, data['acc_all'], state.params.copy())
     stat_history.append(data)
     print(f"Epoch {epoch+1}, Loss: {loss:.4f}")
+
 
 # %%
 import matplotlib.pyplot as plt
@@ -394,7 +388,6 @@ ax4.tick_params(axis='y', color=clist[3], labelcolor=clist[3])
 
 plt.show()
 
-
 # %%
 zipped = tree_zip(*(x['stats'] for x in stat_history[-5:]))
 deltas_over_epochs = jax.tree.map(
@@ -410,16 +403,11 @@ deltas_over_epochs.keys()
 total_change = jax.tree.reduce(lambda a, b: abs(a) + abs(b), deltas_over_epochs)
 print(total_change)
 # %%
-next(iter(deltas_over_epochs.values()))
-# %%
-decode(exp_x[0])
-# %%
 # params = state.params
-params = lowest_loss_params
+*_, params = min_loss
 bound_model = model.bind(
     {'params': params}, 
     rngs={'dropout': rng})
-
 train_preds = bound_model(exp_x, train=False)
 print(train_preds.shape)
 # %%
