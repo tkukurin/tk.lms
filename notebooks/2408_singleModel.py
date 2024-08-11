@@ -316,6 +316,18 @@ exp_raw_x, exp_x, exp_y, exp_mask = exp1()
 min_loss = -1, 9999
 lowest_loss_params = state.params
 # %%
+def actual_metric(x, y, model, state):
+    yhat = model.apply(
+        {'params': state.params}, 
+        x[:, :5], 
+        train=False, 
+        rngs={'dropout': rng})
+    yhat = yhat.argmax(-1)[:, 4]
+    y = y[:, 4]
+    return (yhat == y).mean()
+
+actual_metric(exp_x, exp_y, model, state)
+# %%
 num_epochs = 25
 cur_epoch = len(stat_history)
 for epoch in range(cur_epoch, cur_epoch + num_epochs):
@@ -323,6 +335,7 @@ for epoch in range(cur_epoch, cur_epoch + num_epochs):
         exp_x, exp_y, exp_mask, state, dropout_key=rng)
     data = get_stats(state)
     data['loss'] = loss
+    data['acc'] = actual_metric(exp_x, exp_y, model, state)
     if loss < min_loss[1]:
         print('Saving @', loss)
         lowest_loss_params = state.params.copy()
@@ -332,7 +345,16 @@ for epoch in range(cur_epoch, cur_epoch + num_epochs):
 
 # %%
 import matplotlib.pyplot as plt
-plt.plot([x['loss'] for x in stat_history if 'loss' in x])
+ax1 = plt.gca()
+ax1.set_ylabel('loss', color='b')
+ax1.plot([x['loss'] for x in stat_history if 'loss' in x], color='b')
+ax1.tick_params(axis='y', labelcolor='b')
+ax2 = ax1.twinx()
+ax2.set_ylabel('acc', color='r')
+ax2.plot([x['acc'] for x in stat_history if 'acc' in x], color='r')
+ax2.tick_params(axis='y', labelcolor='r')
+ax2.set_yticks(np.arange(10 + 1) / 10)
+plt.show()
 # %%
 zipped = tree_zip(*(x['stats'] for x in stat_history[-5:]))
 deltas_over_epochs = jax.tree.map(
