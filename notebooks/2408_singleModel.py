@@ -32,8 +32,10 @@ test = [x for _, x in test]
 config, tokenizer = toklib.mktokenizer(train)
 
 # %%
-train_overfit = train[:10]
+train_overfit = [x for x in train if x[0] == '0']
+eval_overfit = [x for x in train if x[2] == '0']
 logger.info(f"{train_overfit=}")
+logger.info(f"{eval_overfit=}")
 
 # %%
 chr2id = {k:v for k,v in tokenizer.vocab.items()}
@@ -266,7 +268,54 @@ def diff(values: tuple[jnp.ndarray]):
 
 # %%
 
-def exp_common():
+from typing import Literal
+import dataclasses as dcls
+from typing import NamedTuple
+
+
+class Enc(NamedTuple):
+    x: jnp.ndarray
+    y: jnp.ndarray
+    mask: jnp.ndarray
+    raw: list[str]
+
+
+class Exp(NamedTuple):
+    name: str
+    train: Enc
+    test: Enc
+    # model: gpt2.GPT
+    # state: TrainState
+    # rng: random.PRNGKey
+
+
+def experiment_data(name: Literal["autoregressive", "classification"]) -> tuple[
+    gpt2.GPT,
+    TrainState,
+    random.PRNGKey,
+    Exp
+]:
+    tokens_train = [
+        labelize(*encode(x, maxlen=8)) for x in train_overfit
+    ]
+    tokens_eval = [
+        labelize(*encode(x, maxlen=8)) for x in eval_overfit
+    ]
+    tokens = tokens_train + tokens_eval
+    logger.debug(x := jnp.array([a for a, b, c in tokens]))
+    logger.debug(y := jnp.array([b for a, b, c in tokens]))
+    if name == "autoregressive":
+        mask = jnp.array([c for a, b, c in tokens])
+    else:
+        mask = np.zeros_like(y)
+        mask[:, 4] = 1
+        assert len(np.unique(y[:, 4])) > 1, f"wrong setup:\n{y}"
+    logger.debug(mask)
+    n = len(mask) // 2
+    assert n == len(tokens_train) == len(tokens_eval)
+    xtr, ytr, masktr = x[:n], y[:n], mask[:n]
+    xev, yev, maskev = x[n:], y[n:], mask[n:]
+
     state = create_train_state(
         (rng := random.PRNGKey(42)),
         (model := gpt2.GPT(gpt2.GPTConfig(
@@ -280,39 +329,23 @@ def exp_common():
         ))),
         learning_rate=5e-5
     )
-    return model, state, rng
+
+    return model, state, rng, Exp(
+        name=name,
+        train=Enc(xtr, ytr, masktr, raw=tokens_train),
+        test=Enc(xev, yev, maskev, raw=tokens_eval),
+    )
 
 
-def exp1():
-    """standard autoregressive mask"""
-    tokens = [
-        labelize(*encode(x, maxlen=8)) for x in train_overfit
-    ]
-    logger.debug(x := jnp.array([a for a, b, c in tokens]))
-    y = jnp.array([b for a, b, c in tokens])
-    mask = jnp.array([c for a, b, c in tokens])
-    return tokens, x, y, mask
 
-
-def exp2():
-    """loss counted only on the output token"""
-    tokens = [
-        labelize(*encode(x, maxlen=8)) for x in train_overfit
-    ]
-    logger.debug(x := jnp.array([a for a, b, c in tokens]))
-    logger.debug(y := jnp.array([b for a, b, c in tokens]))
-    mask = np.zeros_like(y)
-    mask[:, 4] = 1
-    assert len(np.unique(y[:, 4])) > 1, f"wrong setup:\n{y}"
-    logger.debug(mask)
-    return tokens, x, y, jnp.array(mask)
-
-
-stat_history = []
-model, state, rng = exp_common()
-rng, dkey = random.split(rng)
-exp_raw_x, exp_x, exp_y, exp_mask = exp1()
+model, state, rng, exp = experiment_data(name="autoregressive")
+exp_raw_x = exp.train.raw
+exp_x = exp.train.x
+exp_y = exp.train.y
+exp_mask = exp.train.mask
 # %%
+stat_history = []
+rng, dkey = random.split(rng)
 min_loss = -1, 9999, state.params
 max_acc = -1, 0, state.params
 # %%
@@ -329,21 +362,25 @@ def eval_step(x, y, model, params):
     )
     return yhat, metrics
 
-num_epochs = 25
+num_epochs = 125
 cur_epoch = len(stat_history)
 for epoch in range(cur_epoch, cur_epoch + num_epochs):
     state, loss = train_step(
-        exp_x, exp_y, exp_mask, state, dropout_key=rng)
+        exp.train.x, exp.train.y, exp.train.mask, state, dropout_key=rng)
     data = get_stats(state)
     data['loss'] = loss
-    yhat, metrics = eval_step(exp_x, exp_y, model, state.params)
-    data = {**data, **metrics}
+    train_yhat, train_metrics = eval_step(
+        exp.train.x, exp.train.y, model, params=state.params)
+    eval_yhat, eval_metrics = eval_step(
+        exp.test.x, exp.test.y, model, params=state.params)
+    data['train'] = train_metrics
+    data['eval'] = eval_metrics
     if loss < min_loss[1]:
         print('Saving[loss]@', loss)
         min_loss = (epoch, loss, state.params.copy())
-    if data['acc_all'] > max_acc[1]:
-        print('Saving[acca]@', data['acc_all'])
-        max_acc = (epoch, data['acc_all'], state.params.copy())
+    if (acc := data['train']['acc_all']) > max_acc[1]:
+        print('Saving[acca]@', acc)
+        max_acc = (epoch, acc, state.params.copy())
     stat_history.append(data)
     print(f"Epoch {epoch+1}, Loss: {loss:.4f}")
 
@@ -359,18 +396,21 @@ fig, grid = plt.subplots(
 
 ax1 = grid[0]
 ax1.set_ylabel('loss', color=clist[0])
-ax1.plot([x['loss'] for x in stat_history if 'loss' in x], color=clist[0])
+ax1.plot([x['loss'] for x in stat_history], color=clist[0])
 ax1.tick_params(axis='y', labelcolor=clist[0])
+
 
 ax2 = ax1.twinx()
 ax2.set_ylabel('acc', color=clist[1])
-ax2.plot([x['acc'] for x in stat_history if 'acc' in x], color=clist[1])
+ax2.plot([x['train']['acc'] for x in stat_history], color=clist[1], label='train')
+ax2.plot([x['eval']['acc'] for x in stat_history], color=clist[2], label='eval')
+ax2.legend()
 ax2.tick_params(axis='y', labelcolor=clist[1])
 ax2.set_yticks(np.arange(10 + 1) / 10)
 
 ax3 = grid[1]
-ax3.set_ylabel('diff', color=clist[2])
-ax3.tick_params(axis='y', color=clist[2], labelcolor=clist[2])
+ax3.set_ylabel('diff', color=clist[3])
+ax3.tick_params(axis='y', color=clist[3], labelcolor=clist[3])
 total_change_per_epoch = np.array([
     np.mean([mu for mu, var in x['stats'].values()])
     for x in stat_history
