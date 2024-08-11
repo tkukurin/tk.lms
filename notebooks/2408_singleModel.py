@@ -1,4 +1,7 @@
 """Quick model training dynamics script.
+
+We look at autoregressive and classification-like objectives over the same model
+family.
 """
 # %%
 try: from rich import print as show
@@ -25,6 +28,32 @@ from tk.models import gpt2
 import functools as ft
 from flax.training.train_state import TrainState
 
+import joblib
+
+
+class _Reg:
+    """adhoc temp storage"""
+    data = {}
+
+    def add(self, k, v, force=False):
+        if not force:
+            assert k not in self.data, f'{k} exists'
+        self.data[k] = v
+    
+    def dump(self, name: str = ''):
+        import tk
+        suffix = 0
+        s = f'2408_{name}{suffix:03d}'
+        base = tk.datadir / s
+        while (out := base.with_name(s)).exists():
+            suffix += 1
+            s = f'2408_{name}{suffix:03d}'
+
+        joblib.dump(self.data, out)
+        return out
+
+
+registry = _Reg()
 
 train, test = mkdata()
 train = [x for _, x in train]
@@ -337,8 +366,7 @@ def experiment_data(name: Literal["autoregressive", "classification"]) -> tuple[
     )
 
 
-
-model, state, rng, exp = experiment_data(name="autoregressive")
+model, state, rng, exp = experiment_data(name="classification")
 exp_raw_x = exp.train.raw
 exp_x = exp.train.x
 exp_y = exp.train.y
@@ -393,6 +421,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mrgb
 
 clist = list(mrgb.TABLEAU_COLORS)
+from matplotlib.axes import Axes
 
 fig, grid = plt.subplots(
     nrows=2, ncols=1)
@@ -413,8 +442,8 @@ ax2.tick_params(axis='y', labelcolor=clist[1])
 ax2.set_yticks(np.arange(10 + 1) / 10)
 
 ax3 = grid[1]
-ax3.set_ylabel('diff', color=clist[3])
-ax3.tick_params(axis='y', color=clist[3], labelcolor=clist[3])
+ax3.set_ylabel('diff', color=clist[2])
+ax3.tick_params(axis='y', color=clist[2], labelcolor=clist[2])
 total_change_per_epoch = np.array([
     np.mean([mu for mu, var in x['stats'].values()])
     for x in stat_history
@@ -430,6 +459,7 @@ ax4.plot(total_var_per_epoch, color=clist[3])
 ax4.set_ylabel('var', color=clist[3])
 ax4.tick_params(axis='y', color=clist[3], labelcolor=clist[3])
 
+ax1.set_title(exp.name)
 plt.show()
 
 # %%
