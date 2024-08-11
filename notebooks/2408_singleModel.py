@@ -349,18 +349,21 @@ rng, dkey = random.split(rng)
 min_loss = -1, 9999, state.params
 max_acc = -1, 0, state.params
 # %%
-def eval_step(x, y, model, params):
-    yhat = model.apply(
+def eval_step(x, y, mask, model, params):
+    logits = model.apply(
         {'params': params}, 
         x, 
         train=False, 
-        rngs={'dropout': rng})
-    yhat = yhat.argmax(-1)
+        rngs={'dropout': rng}  # unused? can we skip?
+    )
+    yhat = logits.argmax(-1)
     metrics = dict(
         acc = (yhat[:, 4] == y[:, 4]).mean(),
-        acc_all = (yhat == y).mean()
+        acc_all = (yhat == y).mean(),
+        loss = cross_entropy_loss(logits, y, mask)
     )
     return yhat, metrics
+
 
 num_epochs = 125
 cur_epoch = len(stat_history)
@@ -368,11 +371,11 @@ for epoch in range(cur_epoch, cur_epoch + num_epochs):
     state, loss = train_step(
         exp.train.x, exp.train.y, exp.train.mask, state, dropout_key=rng)
     data = get_stats(state)
-    data['loss'] = loss
+    # data['loss'] = loss
     train_yhat, train_metrics = eval_step(
-        exp.train.x, exp.train.y, model, params=state.params)
+        exp.train.x, exp.train.y, exp.train.mask, model, params=state.params)
     eval_yhat, eval_metrics = eval_step(
-        exp.test.x, exp.test.y, model, params=state.params)
+        exp.test.x, exp.test.y, exp.test.mask, model, params=state.params)
     data['train'] = train_metrics
     data['eval'] = eval_metrics
     if loss < min_loss[1]:
@@ -396,14 +399,15 @@ fig, grid = plt.subplots(
 
 ax1 = grid[0]
 ax1.set_ylabel('loss', color=clist[0])
-ax1.plot([x['loss'] for x in stat_history], color=clist[0])
+ax1.plot([x['train']['loss'] for x in stat_history], color=clist[0], label='train')
+ax1.plot([x['eval']['loss'] for x in stat_history], color=clist[0], label='eval', linestyle='dashed')
+ax1.legend()
 ax1.tick_params(axis='y', labelcolor=clist[0])
-
 
 ax2 = ax1.twinx()
 ax2.set_ylabel('acc', color=clist[1])
 ax2.plot([x['train']['acc'] for x in stat_history], color=clist[1], label='train')
-ax2.plot([x['eval']['acc'] for x in stat_history], color=clist[2], label='eval')
+ax2.plot([x['eval']['acc'] for x in stat_history], color=clist[1], label='eval', linestyle='dashed')
 ax2.legend()
 ax2.tick_params(axis='y', labelcolor=clist[1])
 ax2.set_yticks(np.arange(10 + 1) / 10)
