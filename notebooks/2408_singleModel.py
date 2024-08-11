@@ -328,6 +328,17 @@ def actual_metric(x, y, model, state):
 
 actual_metric(exp_x, exp_y, model, state)
 # %%
+def metric_across(x, y, model, params):
+    yhat = model.apply(
+        {'params': params}, 
+        x[:, :5], 
+        train=False, 
+        rngs={'dropout': rng})
+    yhat = yhat.argmax(-1)[:, :5]
+    return (yhat == y[:, :5]).mean()
+
+print(metric_across(exp_x, exp_y, model, lowest_loss_params))
+# %%
 num_epochs = 25
 cur_epoch = len(stat_history)
 for epoch in range(cur_epoch, cur_epoch + num_epochs):
@@ -345,22 +356,63 @@ for epoch in range(cur_epoch, cur_epoch + num_epochs):
 
 # %%
 import matplotlib.pyplot as plt
-ax1 = plt.gca()
-ax1.set_ylabel('loss', color='b')
-ax1.plot([x['loss'] for x in stat_history if 'loss' in x], color='b')
-ax1.tick_params(axis='y', labelcolor='b')
+import matplotlib.colors as mrgb
+
+clist = list(mrgb.TABLEAU_COLORS)
+
+fig, grid = plt.subplots(
+    nrows=2, ncols=1)
+
+ax1 = grid[0]
+ax1.set_ylabel('loss', color=clist[0])
+ax1.plot([x['loss'] for x in stat_history if 'loss' in x], color=clist[0])
+ax1.tick_params(axis='y', labelcolor=clist[0])
+
 ax2 = ax1.twinx()
-ax2.set_ylabel('acc', color='r')
-ax2.plot([x['acc'] for x in stat_history if 'acc' in x], color='r')
-ax2.tick_params(axis='y', labelcolor='r')
+ax2.set_ylabel('acc', color=clist[1])
+ax2.plot([x['acc'] for x in stat_history if 'acc' in x], color=clist[1])
+ax2.tick_params(axis='y', labelcolor=clist[1])
 ax2.set_yticks(np.arange(10 + 1) / 10)
+
+ax3 = grid[1]
+ax3.set_ylabel('diff', color=clist[2])
+ax3.tick_params(axis='y', color=clist[2], labelcolor=clist[2])
+total_change_per_epoch = np.array([
+    np.mean([mu for mu, var in x['stats'].values()])
+    for x in stat_history
+])
+total_var_per_epoch = np.array([
+    np.mean([abs(var) for mu, var in x['stats'].values()])
+    for x in stat_history
+])
+ax3.plot(total_change_per_epoch, color=clist[2])
+
+ax4 = ax3.twinx()
+ax4.plot(total_var_per_epoch, color=clist[3])
+ax4.set_ylabel('var', color=clist[3])
+ax4.tick_params(axis='y', color=clist[3], labelcolor=clist[3])
+
 plt.show()
+
+
 # %%
 zipped = tree_zip(*(x['stats'] for x in stat_history[-5:]))
 deltas_over_epochs = jax.tree.map(
     diff, zipped, is_leaf=lambda x: isinstance(x, (tuple, list)))
 
 get_chart(deltas_over_epochs)
+# %%
+get_chart({k:v for k, v in deltas_over_epochs.items() if 
+    any(x in k for x in ('wpe', 'wte'))
+})
+# %%
+deltas_over_epochs.keys()
+total_change = jax.tree.reduce(lambda a, b: abs(a) + abs(b), deltas_over_epochs)
+print(total_change)
+# %%
+next(iter(deltas_over_epochs.values()))
+# %%
+decode(exp_x[0])
 # %%
 # params = state.params
 params = lowest_loss_params
@@ -371,7 +423,9 @@ bound_model = model.bind(
 train_preds = bound_model(exp_x, train=False)
 print(train_preds.shape)
 # %%
-probs = nn.softmax(train_preds[:, -1])
+# <bof>a + b = c
+# 0    1 2 3 4 5
+probs = nn.softmax(train_preds[:, 4])
 print('after', len(stat_history), 'epochs')
 # %%
 import treescope  # comes with penzai
