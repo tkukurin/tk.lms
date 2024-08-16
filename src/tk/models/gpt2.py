@@ -102,12 +102,12 @@ class GPT(nn.Module):
     config: GPTConfig
 
     @nn.compact
-    def __call__(self, idx, train=False):
-        B, T = idx.shape
+    def __call__(self, txt, train=False):
+        B, T = txt.shape
         assert T <= self.config.block_size, f"Cannot forward sequence of length {T}, block size is only {self.block_size}"
 
         pos = jnp.arange(0, T)[None]
-        attn_mask = nn.make_causal_mask(idx, dtype=bool)
+        attn_mask = nn.make_causal_mask(txt, dtype=bool)
 
         wte = nn.Embed(
             self.config.vocab_size, 
@@ -120,7 +120,7 @@ class GPT(nn.Module):
             dtype=self.config.dtype, 
             name='wpe')
 
-        token_embed = wte(idx)  # [B, T, num_embeds]
+        token_embed = wte(txt)  # [B, T, num_embeds]
         pos_embed = wpe(pos)  # [1, T, num_embeds]
 
         x = nn.Dropout(self.config.dropout_rate)(
@@ -146,6 +146,90 @@ class GPT(nn.Module):
     #     tokens = jnp.zeros((2, self.config.block_size), dtype=jnp.uint16)
     #     params = jax.jit(super().init, static_argnums=(2,))(rng, tokens, True)
     #     return params
+
+
+def put_in_correct_place(
+    text: jnp.ndarray, img: jnp.ndarray, 
+    ixs_text: jnp.ndarray, ixs_img: jnp.ndarray
+) -> jnp.ndarray:
+    max_len = max(jnp.max(ixs_text), jnp.max(ixs_img)) + 1
+    result = jnp.empty(max_len, dtype=text.dtype)
+    result[ixs_text] = text
+    result[ixs_img] = img
+    return result
+
+
+class GPTWithVision(nn.Module):
+    config: GPTConfig
+
+    @nn.compact
+    def __call__(
+        self, 
+        txt: jnp.ndarray, 
+        img: jnp.ndarray | None = None, 
+        # TODO
+        ixs_txt=None,
+        ixs_img=None,
+        train=False
+    ):
+        B, T = txt.shape
+        assert T <= self.config.block_size, f"Cannot forward sequence of length {T}, block size is only {self.block_size}"
+
+        pos = jnp.arange(0, T)[None]
+        attn_mask = nn.make_causal_mask(txt, dtype=bool)
+
+        wte = nn.Embed(
+            self.config.vocab_size, 
+            self.config.num_embeds, 
+            dtype=self.config.dtype, 
+            name='wte')
+        wpe = nn.Embed(
+            self.config.block_size, 
+            self.config.num_embeds, 
+            dtype=self.config.dtype, 
+            name='wpe')
+
+        token_embed = wte(txt)  # [B, T, num_embeds]
+        pos_embed = wpe(pos)  # [1, T, num_embeds]
+
+        if img is not None:
+            # convert wxh into flat
+            img_reshape = img.reshape((*img.shape[:-2], 28*28))
+            vision_embed = nn.Dense(
+                self.config.num_embeds, 
+                dtype=self.config.dtype, 
+                name='vision_proj')(img_reshape)
+            x = jnp.concatenate([vision_embed, token_embed], axis=1)
+            pos_embed = wpe(jnp.arange(0, x.shape[1])[None])
+            # update attn mask for the added vision tokens
+            idxs = jnp.broadcast_to(
+                jnp.arange(x.shape[1], dtype=jnp.int32), 
+                x.shape[:-1]
+            )
+            attn_mask = nn.make_attention_mask(
+                idxs,
+                idxs,
+                jnp.greater_equal,
+            )
+        else:
+            x = token_embed
+
+        pre_blocks = nn.Dropout(self.config.dropout_rate)(
+            x + pos_embed, deterministic=not train)
+        x = pre_blocks
+
+        for i in range(self.config.num_layers):
+            x = Block(self.config, name=str(i))(
+                x, attn_mask, train=train)
+
+        x = nn.LayerNorm(
+            epsilon=1e-5,
+            dtype=self.config.dtype, 
+            use_bias=self.config.use_bias, 
+            name='ln_f')(x)
+        
+        logits = wte.attend(x[:, -T:])
+        return logits
 
 
 def convert_hf_params(hf_params: FrozenDict, num_heads, num_embeds) -> FrozenDict:
