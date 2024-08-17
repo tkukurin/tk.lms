@@ -580,14 +580,14 @@ def eval_step(x, y, mask, model, params):
     metrics = dict(
         # NOTE expect "+=1<pad>"
         # prediction for next token is at ix 4
-        acc = ((yhat[:, [2, 3]] == y[:, [2, 3]]) * mask[:, [2, 3]]).mean(),
-        acc_all = (yhat == y).mean(),
+        acc = ((yhat[:, [2, 3]] == y[:, [2, 3]]) * mask[:, [2, 3]]).sum() / mask[:, [2,3]].sum(),
+        acc_all = (yhat == y).sum() / mask.sum(),
         loss = cross_entropy_loss(logits, y, mask)
     )
     return yhat, metrics
 
 
-num_epochs = 1
+num_epochs = 50
 cur_epoch = len(stat_history)
 for epoch in range(cur_epoch, cur_epoch + num_epochs):
     state, loss = train_step(
