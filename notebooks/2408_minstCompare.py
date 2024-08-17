@@ -13,35 +13,72 @@ import matplotlib.pyplot as plt
 # from scipy.fftpack import fft2, ifft2, fftshift, ifftshift
 from jax.numpy.fft import fft2, ifft2, fftshift, ifftshift
 from jax import random
-
+# %%
 from tk.utils.data.fetch import load_mnist_gzip
-
-
-def remove_high_freq(image: jnp.ndarray, cutoff_ratio=0.2):
+train = load_mnist_gzip('train')
+# %%
+def rmfreqs(image: jnp.ndarray, cutoff=0.2, rm='lo'):
     f_transform = fft2(image)
     f_shifted = fftshift(f_transform)
     h, w = image.shape
     cx, cy = w // 2, h // 2
-    cutoff_x = int(cx * cutoff_ratio)
-    cutoff_y = int(cy * cutoff_ratio)
-    mask = jnp.zeros_like(image)
-    mask = mask.at[cy-cutoff_y:cy+cutoff_y, cx-cutoff_x:cx+cutoff_x].set(1)
+    cutoff_x = int(cx * cutoff)
+    cutoff_y = int(cy * cutoff)
+    if rm == 'hi':
+        setval = 1
+        mask = jnp.zeros_like(image)
+    else:
+        assert rm == 'lo', f'{rm=}'
+        setval = 0
+        mask = jnp.ones_like(image)
+    mask = mask.at[cy-cutoff_y:cy+cutoff_y, cx-cutoff_x:cx+cutoff_x].set(setval)
     f_shifted *= mask
     return jnp.abs(ifft2(ifftshift(f_shifted)))
 
 
-train = load_mnist_gzip('train')
-sample_image = jnp.array(train.x[0])
-filtered_image = remove_high_freq(sample_image)
+rm_hifreq = ft.partial(rmfreqs, rm='hi')
+rm_lofreq = ft.partial(rmfreqs, rm='lo')
 
-plt.figure(figsize=(8, 4))
-plt.subplot(1, 2, 1)
-plt.title("Original Image")
-plt.imshow(sample_image, cmap='gray')
-plt.subplot(1, 2, 2)
-plt.title("Filtered Image")
-plt.imshow(filtered_image, cmap='gray')
-plt.show()
+
+def side_by_side(
+    imgs: jnp.ndarray | dict,
+    nrows: int | None = None,
+    titles: dict = None,
+):
+    """plot imgs side by side"""
+    titles = titles or {}
+    if isinstance(imgs, dict):
+        titles = dict(enumerate(imgs.keys()))
+        imgs = list(imgs.values())
+    elif len(imgs) == 2:
+        titles = {0: "Original", 1: "Filtered"}
+    n = len(imgs)
+    ncols = min(n, 5)
+    fig, ax = plt.subplots(
+        nrows=nrows or n // ncols, 
+        ncols=(n // nrows) if nrows else ncols,
+    )
+    ax = ax.flatten()
+    for i, img in enumerate(imgs):
+        ax[i].set_title(f"{titles.get(i, i)}")
+        ax[i].imshow(img, cmap='gray')
+        ax[i].set_axis_off()
+    fig.tight_layout()
+    return fig, ax
+
+sample_image = jnp.array(train.x[0])
+# %%
+filtered_images = {
+    f'{cutoff=}': rmfreqs(sample_image, cutoff=cutoff, rm='hi')
+    for cutoff in (1, .75, .5, .25, .1)
+}
+fig, ax = side_by_side(filtered_images)
+# %%
+filtered_images = {
+    f'{cutoff=}': rmfreqs(sample_image, cutoff=cutoff, rm='lo')
+    for cutoff in (0, .25, .5, .75, .9)
+}
+fig, ax = side_by_side(filtered_images)
 # %%
 from collections import defaultdict
 
@@ -93,8 +130,8 @@ i0, i1 = map(sampler, (l2img[0], l2img[1]))
 dists_before = compare(i0, i1)
 print('Before', dists_before.mean(), dists_before.std())
 
-lofreq0 = jax.vmap(remove_high_freq)(jnp.array(i0))
-lofreq1 = jax.vmap(remove_high_freq)(jnp.array(i1))
+lofreq0 = jax.vmap(rm_hifreq)(jnp.array(i0))
+lofreq1 = jax.vmap(rm_hifreq)(jnp.array(i1))
 dists_after = compare(lofreq0, lofreq1)
 print('After', dists_after.mean(), dists_after.std())
 
@@ -103,4 +140,11 @@ dists = compare(i0, lofreq0)
 print('Within 0 ::', dists.mean(), dists.std())
 dists = compare(i1, lofreq1)
 print('Within 1 ::', dists.mean(), dists.std())
+# %%
+_ = side_by_side([i0[0], lofreq0[0], i0[1], lofreq0[1]], nrows=2)
+# %%
+_ = side_by_side([i0[0], i1[0]])
+# %%
+_ = side_by_side([lofreq0[0], lofreq1[0]])
+
 # %%
