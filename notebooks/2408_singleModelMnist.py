@@ -11,55 +11,17 @@ import tk.utils as u
 from pathlib import Path
 from loguru import logger
 
-locs = [
-    'https://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz',
-    'https://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz',
-    'https://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz',
-    'https://yann.lecun.com/exdb/mnist/t10k-labels-idx3-ubyte.gz',
-]
-do_download = False
+from tk.utils.data.fetch import load_mnist_gzip
 
-if not (mnist_dir := tk.datadir / "MNIST" / "raw").exists():
-    if not do_download:
-        raise Exception(f'{mnist_dir=}')
-    mnist_dir.mkdir(parents=True, exist_ok=True)
-    for loc in locs:
-        logger.info(f'Downloading: {loc}\n -> {mnist_dir}')
-        with open(mnist_dir, 'wb') as f:
-            data = u.fetch(loc)
-            f.write(data)
-
-
-def load_mnist_gzip(data_dir: Path, which='train'):
-    """Download from [lecunx], [lecuny].
-
-    [lecunx]: https://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz
-    [lecuny]: https://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz
-    [lecunx-test]: https://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz
-    [lecuny-test]: https://yann.lecun.com/exdb/mnist/t10k-labels-idx3-ubyte.gz
-    """
-    images_path = Path(data_dir) / f'{which}-images-idx3-ubyte.gz'
-    labels_path = Path(data_dir) / f'{which}-labels-idx1-ubyte.gz'
-
-    with gzip.open(labels_path, 'rb') as lbl_f:
-        labels = np.frombuffer(lbl_f.read(), dtype=np.uint8, offset=8)
-    with gzip.open(images_path, 'rb') as f:
-        img_data = np.frombuffer(
-            f.read(), dtype=np.uint8, offset=16
-        ).reshape(-1, 28, 28)
-
-    return {'image': img_data, 'label': labels}
-
-
-dataset = load_mnist_gzip(mnist_dir, 'train')
+dataset = load_mnist_gzip(which='train')
 
 # %%
-print({k: v.shape for k, v in dataset.items()})
+print({k: v.shape for k, v in dataset._asdict().items()})
 # %%
 for i in range(10):
     plt.subplot(2, 5, i + 1)
-    plt.imshow(dataset['image'][i], cmap='gray')
-    plt.title(f"Label: {dataset['label'][i]}")
+    plt.imshow(dataset.x[i], cmap='gray')
+    plt.title(f"Label: {dataset.y[i]}")
     plt.axis('off')
 plt.show()
 # %%
@@ -73,7 +35,7 @@ chr2id = {v:k for k, v in id2chr.items()}
 from collections import defaultdict
 
 l2img = defaultdict(list)
-for img, lbl in zip(dataset['image'], dataset['label']):
+for img, lbl in zip(dataset.x, dataset.y):
     l2img[lbl].append(img)
 
 l2img = {k: np.stack(v) for k, v in l2img.items()}
@@ -93,6 +55,8 @@ class Data(NamedTuple):
     snd: np.ndarray  # N x (wxh)
     fst_label: np.ndarray  # () or (N, )
     snd_label: np.ndarray  # () or (N, )
+    fst_ixs: np.ndarray
+    snd_ixs: np.ndarray
     txt: None | np.ndarray = None
     txt_label: None | np.ndarray = None
 
@@ -132,6 +96,8 @@ def create_train_test(
             imgs_snd[ixs_snd[:ntrain]],
             np.array(fst), 
             np.array(snd),
+            ixs_fst[:ntrain],
+            ixs_snd[:ntrain],
             txt,
             txt_label,
         )
@@ -140,6 +106,8 @@ def create_train_test(
             imgs_snd[ixs_snd[ntrain:]],
             np.array(fst), 
             np.array(snd),
+            ixs_fst[ntrain:], 
+            ixs_snd[ntrain:],
             txt,
             txt_label
         )
@@ -195,7 +163,8 @@ def create_train_state(
     else:
         params = model.init(rng, x)['params']
     tx = optax.adam(learning_rate)
-    return TrainState.create(apply_fn=model.apply, params=params, tx=tx)
+    return TrainState.create(
+        apply_fn=model.apply, params=params, tx=tx)
 
 
 model = gpt2.GPTWithVision(gpt2.GPTConfig(
@@ -734,5 +703,10 @@ print(test_preds.shape)
 probs_test = nn.softmax(test_preds[:, 4])
 print('after', len(stat_history), 'epochs')
 treescope.render_array(probs_test)
+# %%
+data: Data
+for label, data in test.items():
+    label_convert = id2chr[data.txt_label[:, 4].item()]
+
 
 # %%
