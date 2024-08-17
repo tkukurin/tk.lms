@@ -578,7 +578,7 @@ def eval_step(x, y, mask, model, params):
     #print(yhat.shape)
     #print(yhat[:, [2, 3]])
     metrics = dict(
-        # NOTE expect "+=1<pad>"
+        # NOTE expect "<bos>+=1<pad>"
         # prediction for next token is at ix 4
         acc = ((yhat[:, [2, 3]] == y[:, [2, 3]]) * mask[:, [2, 3]]).sum() / mask[:, [2,3]].sum(),
         acc_all = (yhat == y).sum() / mask.sum(),
@@ -680,13 +680,10 @@ x, xvis = exp.train.x
 train_preds = bound_model(x, xvis, train=False)
 print(train_preds.shape)
 # %%
-print(chr2id)
-# %%
-# <bof>a + b = c
-# 0    1 2 3 4 5
 probs_train = (
-    nn.softmax(train_preds)[:, 0]
-    + nn.softmax(train_preds)[:, 1]
+    # NOTE expect "<bos>+=1<pad>"
+    nn.softmax(train_preds)[:, [2, 3]]
+    #+ nn.softmax(train_preds)[:, 2]
 )
 print('after', len(stat_history), 'epochs')
 
@@ -699,13 +696,8 @@ import treescope
 x, xvis = exp.test.x
 test_preds = bound_model(x, xvis, train=False)
 print(test_preds.shape)
-probs_test = nn.softmax(test_preds[:, 4])
+probs_test = nn.softmax(test_preds[:, [2,3]])
 print('after', len(stat_history), 'epochs')
 treescope.render_array(probs_test)
-# %%
-data: Data
-for label, data in test.items():
-    label_convert = id2chr[data.txt_label[:, 4].item()]
-
 
 # %%
