@@ -1,23 +1,45 @@
+"""WIP, almost the same objective as in singleModel but w/ MNIST digits.
+"""
 # %%
 import gzip
 import numpy as np
 import matplotlib.pyplot as plt
 
 import tk
+import tk.utils as u
 
 from pathlib import Path
 from loguru import logger
 
+locs = [
+    'https://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz',
+    'https://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz',
+    'https://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz',
+    'https://yann.lecun.com/exdb/mnist/t10k-labels-idx3-ubyte.gz',
+]
+do_download = False
 
 if not (mnist_dir := tk.datadir / "MNIST" / "raw").exists():
-    while not mnist_dir.exists():
-        mnist_dir = mnist_dir.parent
-    assert False, f"{list(mnist_dir.glob('*'))}"
+    if not do_download:
+        raise Exception(f'{mnist_dir=}')
+    mnist_dir.mkdir(parents=True, exist_ok=True)
+    for loc in locs:
+        logger.info(f'Downloading: {loc}\n -> {mnist_dir}')
+        with open(mnist_dir, 'wb') as f:
+            data = u.fetch(loc)
+            f.write(data)
 
 
-def load_mnist_gzip(data_dir):
-    images_path = Path(data_dir) / 'train-images-idx3-ubyte.gz'
-    labels_path = Path(data_dir) / 'train-labels-idx1-ubyte.gz'
+def load_mnist_gzip(data_dir: Path, which='train'):
+    """Download from [lecunx], [lecuny].
+
+    [lecunx]: https://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz
+    [lecuny]: https://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz
+    [lecunx-test]: https://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz
+    [lecuny-test]: https://yann.lecun.com/exdb/mnist/t10k-labels-idx3-ubyte.gz
+    """
+    images_path = Path(data_dir) / f'{which}-images-idx3-ubyte.gz'
+    labels_path = Path(data_dir) / f'{which}-labels-idx1-ubyte.gz'
 
     with gzip.open(labels_path, 'rb') as lbl_f:
         labels = np.frombuffer(lbl_f.read(), dtype=np.uint8, offset=8)
@@ -29,7 +51,8 @@ def load_mnist_gzip(data_dir):
     return {'image': img_data, 'label': labels}
 
 
-dataset = load_mnist_gzip(mnist_dir)
+dataset = load_mnist_gzip(mnist_dir, 'train')
+
 # %%
 print({k: v.shape for k, v in dataset.items()})
 # %%
@@ -266,7 +289,15 @@ def tensorize_all(data: Data):
 
 
 print(tensorize(train[0], 0))
-Xvis, Xtext, ytext = tensorize_all(train[0])
+Xvis, Xtext, ytext = [], [], []
+for k, v in train.items():
+    a, b, c = tensorize_all(v)
+    Xvis.append(a)
+    Xtext.append(b)
+    ytext.append(c)
+Xvis = jnp.concatenate(Xvis)
+Xtext = jnp.concatenate(Xtext)
+ytext = jnp.concatenate(ytext)
 print(Xvis.shape)
 print(Xtext.shape, ytext.shape)
 
@@ -518,8 +549,21 @@ state = create_train_state(
     learning_rate=5e-5
 )
 # %%
-Xvis, Xtext, ytext = tensorize_all(train[0])
-xtvis, xttext, yttext = tensorize_all(test[0])
+
+def tensorize_all_lst(datas: dict[int, Data]):
+    Xvis, Xtext, ytext = [], [], []
+    for k, v in datas.items():
+        a, b, c = tensorize_all(v)
+        Xvis.append(a)
+        Xtext.append(b)
+        ytext.append(c)
+    Xvis = jnp.concatenate(Xvis)
+    Xtext = jnp.concatenate(Xtext)
+    ytext = jnp.concatenate(ytext)
+    return Xvis, Xtext, ytext
+
+Xvis, Xtext, ytext = tensorize_all_lst(train)
+xtvis, xttext, yttext = tensorize_all_lst(test)
 ytext = ytext[:, [3, 4]]
 yttext = yttext[:, [3, 4]]
 exp = Exp(
@@ -675,9 +719,20 @@ print(train_preds.shape)
 # %%
 # <bof>a + b = c
 # 0    1 2 3 4 5
-probs = nn.softmax(train_preds[:, 4])
+probs_train = nn.softmax(train_preds[:, 4])
 print('after', len(stat_history), 'epochs')
 
 # %%
 import treescope  # comes with penzai
-treescope.render_array(probs)
+treescope.render_array(probs_train)
+
+# %%
+import treescope
+x, xvis = exp.test.x
+test_preds = bound_model(x, xvis, train=False)
+print(test_preds.shape)
+probs_test = nn.softmax(test_preds[:, 4])
+print('after', len(stat_history), 'epochs')
+treescope.render_array(probs_test)
+
+# %%
