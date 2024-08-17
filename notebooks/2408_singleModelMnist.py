@@ -12,9 +12,11 @@ from pathlib import Path
 from loguru import logger
 
 from tk.utils.data.fetch import load_mnist_gzip
-
 dataset = load_mnist_gzip(which='train')
 
+# %%
+try: from rich import print as rprint
+except: rprint  = print
 # %%
 print({k: v.shape for k, v in dataset._asdict().items()})
 # %%
@@ -28,9 +30,14 @@ plt.show()
 from tk.models import gpt2
 from tk.utils.data.tokenizer import special_tokens
 
-vocab = list(special_tokens.values()) + list('0123456789+=')
+exps_todo = ['+', '-']
+exp_tokens = [k for k in exps_todo]
+
+vocab = list(special_tokens.values()) + list('0123456789=') + exp_tokens
 id2chr = {k:v for k, v in enumerate(vocab)}
 chr2id = {v:k for k, v in id2chr.items()}
+rprint('Planning: ', exps_todo)
+rprint(id2chr)
 # %%
 from collections import defaultdict
 
@@ -57,128 +64,26 @@ class Data(NamedTuple):
     snd_label: np.ndarray  # () or (N, )
     fst_ixs: np.ndarray
     snd_ixs: np.ndarray
-    txt: None | np.ndarray = None
-    txt_label: None | np.ndarray = None
 
+    xtxt: np.ndarray
+    ytxt: np.ndarray
+    mask: np.ndarray
 
-def create_train_test(
-    l2img: dict[int, np.ndarray],
-    fst_from: tuple = (0, ),
-    snd_from: tuple = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
-    ntrain: int = 10,
-    ntest: int = 10,
-    operation: Callable = lambda *xs: sum(xs),
-    rng: np.random.RandomState = np.random
-) -> tuple:
-    train_data = {}
-    test_data = {}
-    txt = np.array([chr2id['+'], chr2id['=']])[None, ...]
+    op: str | None = None
     
-    for fst, snd in it.product(fst_from, snd_from):
-        imgs_fst = l2img[fst]
-        imgs_snd = l2img[snd]
-
-        nfst = len(imgs_fst)
-        nsnd = len(imgs_snd)
-        label = operation(fst, snd)
-        txt_label = np.array([
-            chr2id[str(fst)],
-            chr2id['+'],
-            chr2id[str(snd)],
-            chr2id['='],
-            chr2id[str(label)],
-        ])[None, ...]
-
-        ixs_fst = rng.randint(0, nfst, ntrain + ntest)
-        ixs_snd = rng.randint(0, nsnd, ntrain + ntest)
-        train_data[label] = Data(
-            imgs_fst[ixs_fst[:ntrain]], 
-            imgs_snd[ixs_snd[:ntrain]],
-            np.array(fst), 
-            np.array(snd),
-            ixs_fst[:ntrain],
-            ixs_snd[:ntrain],
-            txt,
-            txt_label,
-        )
-        test_data[label] = Data(
-            imgs_fst[ixs_fst[ntrain:]], 
-            imgs_snd[ixs_snd[ntrain:]],
-            np.array(fst), 
-            np.array(snd),
-            ixs_fst[ntrain:], 
-            ixs_snd[ntrain:],
-            txt,
-            txt_label
-        )
-        
-    return train_data, test_data
+    @property
+    def xvis(self):
+        stack = jnp.stack([self.fst, self.snd])
+        return stack.swapaxes(0, 1)
 
 
-train, test = create_train_test(l2img)
-print()
-print(jax.tree.map(lambda xs: xs.shape, train))
-print()
-print(jax.tree.map(lambda xs: xs.shape, test))
-# %% Sanity check correctness
-import matplotlib.pyplot as plt
+class Op(NamedTuple):
+    symbol: str
+    call: Callable
 
-plt.figure(figsize=(10, 4))
+    def __call__(self, *xs):
+        return self.call(*xs)
 
-for i, sum_lbl in enumerate(train):
-    if i >= 6:
-        break
-
-    plt.subplot(2, 6, i * 2 + 1)
-    plt.imshow(train[sum_lbl][0][0], cmap='gray')
-    plt.title(f"Sum: {sum_lbl}")
-    plt.axis('off')
-    
-    plt.subplot(2, 6, i * 2 + 2)
-    plt.imshow(train[sum_lbl][1][0], cmap='gray')
-    plt.axis('off')
-
-plt.show()
-
-
-# %%
-import jax.numpy as jnp
-import optax
-from flax.training.train_state import TrainState
-
-
-def create_train_state(
-    rng, 
-    model, 
-    learning_rate, 
-    input_shape=None, 
-    input_shape_vis=None
-):
-    input_shape = input_shape or (1, model.config.block_size)
-    x = jnp.ones(input_shape, dtype=jnp.int32)
-    if isinstance(model, gpt2.GPTWithVision):
-        input_shape_vis = input_shape_vis or (1, 1, 28, 28)
-        xvis = jnp.ones(input_shape_vis, dtype=jnp.uint8)
-        params = model.init(rng, txt=x, img=xvis)['params']
-    else:
-        params = model.init(rng, x)['params']
-    tx = optax.adam(learning_rate)
-    return TrainState.create(
-        apply_fn=model.apply, params=params, tx=tx)
-
-
-model = gpt2.GPTWithVision(gpt2.GPTConfig(
-    block_size=16,
-    vocab_size=len(chr2id),
-    num_layers=4,
-    num_heads=12,
-    num_embeds=768
-))
-rng = jax.random.PRNGKey(42)
-rng, trng = jax.random.split(rng)
-train_state = create_train_state(trng, model, 1e-4)
-
-# %%
 pad_token_id = chr2id['<pad>']
 bos_token_id = chr2id['<bof>']
 eos_token_id = chr2id['<eof>']
@@ -223,50 +128,154 @@ print(encode(sample, 16))
 print(labelize(*encode(sample, 16)))
 print(decode(encode(sample)[0]))
 
+
+def create_train_test(
+    l2img: dict[int, np.ndarray],
+    fst_from: tuple = (0, ),
+    snd_from: tuple = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+    ntrain: int = 10,
+    ntest: int = 10,
+    operations: tuple[Op] = (
+        Op('+', lambda *xs: sum(xs)),
+    ),
+    rng: np.random.RandomState = np.random
+) -> tuple:
+    train_data = defaultdict(list)
+    test_data = defaultdict(list)
+    
+    for fst, snd in it.product(fst_from, snd_from):
+        imgs_fst = l2img[fst]
+        imgs_snd = l2img[snd]
+
+        nfst = len(imgs_fst)
+        nsnd = len(imgs_snd)
+        ixs_fst = rng.randint(0, nfst, ntrain + ntest)
+        ixs_snd = rng.randint(0, nsnd, ntrain + ntest)
+
+        for op in operations:
+            label = op(fst, snd)
+            xtxt, ytxt, mtxt = labelize(*encode(
+                f'{op.symbol}={label}', maxlen=8
+            ))
+
+            train_data[label].append(Data(
+                imgs_fst[ixs_fst[:ntrain]], 
+                imgs_snd[ixs_snd[:ntrain]],
+                np.array(fst), 
+                np.array(snd),
+                ixs_fst[:ntrain],
+                ixs_snd[:ntrain],
+                xtxt=xtxt[None, ...],
+                ytxt=ytxt[None, ...],
+                mask=mtxt[None, ...],
+                op=f'{fst}{op.symbol}{snd}',
+            ))
+            test_data[label].append(Data(
+                imgs_fst[ixs_fst[ntrain:]], 
+                imgs_snd[ixs_snd[ntrain:]],
+                np.array(fst), 
+                np.array(snd),
+                ixs_fst[ntrain:], 
+                ixs_snd[ntrain:],
+                xtxt=xtxt[None, ...],
+                ytxt=ytxt[None, ...],
+                mask=mtxt[None, ...],
+                op=f'{fst}{op.symbol}{snd}',
+            ))
+        
+    return train_data, test_data
+
+
+sym2op = {
+    '+': lambda a, b: a+b, 
+    '-': lambda a, b: a-b,
+}
+operations=[Op(k,sym2op[k]) for k in exps_todo]
+logger.info([(o.symbol, o(1, 2)) for o in operations])
 # %%
-def visual_encode(
-    txt: None | jnp.ndarray | str = None,
-    img: None | jnp.ndarray | tuple | list = None,
-    maxlen: int = 16,
+train, test = create_train_test(l2img, operations=operations)
+print()
+safe_shape = lambda x: getattr(x, 'shape', None)
+print(jax.tree.map(safe_shape, train))
+print()
+print(jax.tree.map(safe_shape, test))
+# %% Sanity check correctness
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(10, 4))
+
+for i, k in enumerate(train):
+    if i >= 6:
+        break
+
+    datas = train[k][0]
+
+    plt.subplot(2, 6, i+1)
+    imgs = np.hstack([
+        datas.fst[0], datas.snd[0]
+    ])
+    plt.imshow(imgs, cmap='gray')
+    plt.title(f"{datas.op}={k}")
+    plt.axis('off')
+
+plt.show()
+
+# %%
+import jax.numpy as jnp
+import optax
+from flax.training.train_state import TrainState
+
+
+def create_train_state(
+    rng, 
+    model, 
+    learning_rate, 
+    input_shape=None, 
+    input_shape_vis=None
 ):
-    if isinstance(txt, str):
-        txt, mask = encode(txt, maxlen=maxlen)
-    if isinstance(img, (tuple, list)):
-        img = jnp.stack(img)
-    return txt, img, mask
+    input_shape = input_shape or (1, model.config.block_size)
+    x = jnp.ones(input_shape, dtype=jnp.int32)
+    if isinstance(model, gpt2.GPTWithVision):
+        input_shape_vis = input_shape_vis or (1, 1, 28, 28)
+        xvis = jnp.ones(input_shape_vis, dtype=jnp.uint8)
+        params = model.init(rng, txt=x, img=xvis)['params']
+    else:
+        params = model.init(rng, x)['params']
+    tx = optax.adam(learning_rate)
+    return TrainState.create(
+        apply_fn=model.apply, params=params, tx=tx)
 
-txt, img, mask = visual_encode(
-    txt="+",
-    img=[train[0].fst[0], train[0].snd[0]],
-)
-print(txt.shape, img.shape, mask.shape)
+
+model = gpt2.GPTWithVision(gpt2.GPTConfig(
+    block_size=16,
+    vocab_size=len(chr2id),
+    num_layers=4,
+    num_heads=12,
+    num_embeds=768
+))
+rng = jax.random.PRNGKey(42)
+rng, trng = jax.random.split(rng)
+train_state = create_train_state(trng, model, 1e-4)
+
 # %%
-def tensorize(data: Data, i: int):
-    """prepare for gpt input"""
-    return jnp.stack([data.fst[i], data.snd[i]])
 
+def tensorize_all_lst(datas: dict[int, Data]):
+    Xvis, Xtext, ytext, mask = [], [], [], []
+    for k, vs in datas.items():
+        for v in vs:
+            print(v.fst)
+            Xvis.append(v.xvis)
+            n = v.xvis.shape[0]
+            Xtext.append(jnp.repeat(v.xtxt, n, axis=0))
+            ytext.append(jnp.repeat(v.ytxt, n, axis=0))
+            mask.append(jnp.repeat(v.mask, n, axis=0))
+    Xvis = jnp.concatenate(Xvis)
+    Xtext = jnp.concatenate(Xtext)
+    ytext = jnp.concatenate(ytext)
+    mask = jnp.concatenate(mask)
+    return Xvis, Xtext, ytext, mask
 
-def tensorize_all(data: Data):
-    # B x T x W x H
-    X = jnp.stack([data.fst, data.snd]).swapaxes(0, 1)
-    n, *_ = X.shape
-    return (
-        X, 
-        jnp.repeat(data.txt, n, 0),
-        jnp.repeat(data.txt_label, n, 0)
-    )
-
-
-print(tensorize(train[0], 0))
-Xvis, Xtext, ytext = [], [], []
-for k, v in train.items():
-    a, b, c = tensorize_all(v)
-    Xvis.append(a)
-    Xtext.append(b)
-    ytext.append(c)
-Xvis = jnp.concatenate(Xvis)
-Xtext = jnp.concatenate(Xtext)
-ytext = jnp.concatenate(ytext)
+Xvis, Xtext, ytext, mask = tensorize_all_lst(train)
 print(Xvis.shape)
 print(Xtext.shape, ytext.shape)
 
@@ -317,9 +326,6 @@ print(logits := model.apply(
     #img=Xvis[0:1, ...],
     rngs={'dropout': mrng}))
 #print(logits.shape)
-# %%
-print(Xtext[0:1, ...].shape)
-print(Xvis[0:1, ...].shape)
 
 # %%
 from flax import linen as nn
@@ -519,26 +525,12 @@ state = create_train_state(
 )
 # %%
 
-def tensorize_all_lst(datas: dict[int, Data]):
-    Xvis, Xtext, ytext = [], [], []
-    for k, v in datas.items():
-        a, b, c = tensorize_all(v)
-        Xvis.append(a)
-        Xtext.append(b)
-        ytext.append(c)
-    Xvis = jnp.concatenate(Xvis)
-    Xtext = jnp.concatenate(Xtext)
-    ytext = jnp.concatenate(ytext)
-    return Xvis, Xtext, ytext
-
-Xvis, Xtext, ytext = tensorize_all_lst(train)
-xtvis, xttext, yttext = tensorize_all_lst(test)
-ytext = ytext[:, [3, 4]]
-yttext = yttext[:, [3, 4]]
+Xvis, Xtext, ytext, Xmask = tensorize_all_lst(train)
+xtvis, xttext, yttext, xtmask = tensorize_all_lst(test)
 exp = Exp(
     "visual",
-    train=Enc(x=(Xtext, Xvis), y=ytext, mask=None, raw=None),
-    test=Enc(x=(xttext, xtvis), y=yttext, mask=None, raw=None),
+    train=Enc(x=(Xtext, Xvis), y=ytext, mask=Xmask, raw=None),
+    test=Enc(x=(xttext, xtvis), y=yttext, mask=xtmask, raw=None),
 )
 
 # %%
@@ -583,17 +575,19 @@ def eval_step(x, y, mask, model, params):
         rngs={'dropout': rng}  # unused? can we skip?
     )
     yhat = logits.argmax(-1)
+    #print(yhat.shape)
+    #print(yhat[:, [2, 3]])
     metrics = dict(
-        # NOTE expect "<bos>a+b="
+        # NOTE expect "+=1<pad>"
         # prediction for next token is at ix 4
-        acc = (yhat[:, 4] == y[:, 4]).mean(),
+        acc = ((yhat[:, [2, 3]] == y[:, [2, 3]]) * mask[:, [2, 3]]).mean(),
         acc_all = (yhat == y).mean(),
         loss = cross_entropy_loss(logits, y, mask)
     )
     return yhat, metrics
 
 
-num_epochs = 100
+num_epochs = 1
 cur_epoch = len(stat_history)
 for epoch in range(cur_epoch, cur_epoch + num_epochs):
     state, loss = train_step(
@@ -686,9 +680,14 @@ x, xvis = exp.train.x
 train_preds = bound_model(x, xvis, train=False)
 print(train_preds.shape)
 # %%
+print(chr2id)
+# %%
 # <bof>a + b = c
 # 0    1 2 3 4 5
-probs_train = nn.softmax(train_preds[:, 4])
+probs_train = (
+    nn.softmax(train_preds)[:, 0]
+    + nn.softmax(train_preds)[:, 1]
+)
 print('after', len(stat_history), 'epochs')
 
 # %%
