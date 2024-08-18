@@ -541,8 +541,8 @@ state = create_train_state(
     (model := gpt2.GPTWithVision(gpt2.GPTConfig(
         block_size=16,
         vocab_size=max(id2chr) + 1,
-        num_embeds=128,
-        num_layers=4,
+        num_embeds=256,
+        num_layers=8,
         num_heads=4,
         dropout_rate=0.1,
         use_bias=True,
@@ -587,6 +587,7 @@ def eval_step(x, y, mask, model, params):
             eqs_row == masksel.sum(-1))[0],
         ixs_incorrect = jnp.where(
             eqs_row != masksel.sum(-1))[0],
+        # NB this is token level accuracy
         acc = eqs.sum() / masksel.sum(),
         acc_all = ((yhat == y) * mask).sum() / mask.sum(),
         loss = cross_entropy_loss(logits, y, mask)
@@ -594,7 +595,7 @@ def eval_step(x, y, mask, model, params):
     return yhat, metrics
 
 
-num_epochs = 2
+num_epochs = 1000
 cur_epoch = len(stat_history)
 for epoch in range(cur_epoch, cur_epoch + num_epochs):
     state, loss = train_step(
@@ -614,13 +615,21 @@ for epoch in range(cur_epoch, cur_epoch + num_epochs):
         max_acc = (epoch, acc, state.params.copy())
     if (acc := data['eval']['acc_all']) > max_acc_eval[1]:
         print('Saving[aa_eval]@', acc)
-        max_acc = (epoch, acc, state.params.copy())
+        max_acc_eval = (epoch, acc, state.params.copy())
     stat_history.append(data)
     print(f"Epoch {epoch+1}, Loss: {loss:.4f}")
 
 
 # %%
 fails = stat_history[-1]['eval']['ixs_incorrect']
+nonfails = stat_history[-1]['eval']['ixs_correct']
+print((a := len(fails)), (b := len(nonfails)), b / (a + b), stat_history[-1]['eval']['acc'])
+Xvis_fails = Xvis[fails]
+sh = np.array([0, 25, -10])
+plt.imshow(np.hstack(np.vstack(Xvis_fails[sh])), cmap='gray')
+plt.axis('off')
+plt.tight_layout()
+# %%
 # %%
 import matplotlib.pyplot as plt
 import matplotlib.colors as mrgb
