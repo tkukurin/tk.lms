@@ -39,9 +39,12 @@ def words(lang: str = 'en') -> set[str]:
 def mnist(mnist_dir: str | Path = mnist_default_dir) -> tuple[dict, dict]:
     mnist_dir.mkdir(parents=True, exist_ok=True)
     for loc in mnist_locs:
-        logger.info(f'Downloading: {loc}\n -> {mnist_dir}')
         name = loc[loc.rfind('/') + 1:]
-        with open(mnist_dir / name, 'wb') as f:
+        if  (fout := mnist_dir / name).exists():
+            logger.debug(f"Skipping {fout}")
+            continue
+        logger.info(f'Downloading: {loc}\n -> {mnist_dir}')
+        with open(fout, 'wb') as f:
             if data := fetch(loc):
                 f.write(data)
     return (
