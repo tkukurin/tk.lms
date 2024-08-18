@@ -1,9 +1,15 @@
 """WIP, almost the same objective as in singleModel but w/ MNIST digits.
 """
 # %%
-import gzip
+try: from rich import print as rprint
+except: rprint  = print
+
+import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
+
+import itertools as it
+import functools as ft
 
 import tk
 import tk.utils as u
@@ -13,12 +19,33 @@ from loguru import logger
 
 from tk.utils.data.fetch import load_mnist_gzip
 dataset = load_mnist_gzip(which='train')
-
-# %%
-try: from rich import print as rprint
-except: rprint  = print
-# %%
 print({k: v.shape for k, v in dataset._asdict().items()})
+# %%
+import joblib
+
+class _Reg:
+    """adhoc temp storage"""
+    data = {}
+
+    def add(self, k, v, force=False):
+        if not force:
+            assert k not in self.data, f'{k} exists'
+        self.data[k] = v
+    
+    def dump(self, name: str = ''):
+        import tk
+        suffix = 0
+        s = f'2408_{name}{suffix:03d}'
+        base = tk.datadir / s
+        while (out := base.with_name(s)).exists():
+            suffix += 1
+            s = f'2408_{name}{suffix:03d}'
+
+        joblib.dump(self.data, out)
+        return out
+
+
+registry = _Reg()
 # %%
 for i in range(10):
     plt.subplot(2, 5, i + 1)
@@ -30,10 +57,16 @@ plt.show()
 from tk.models import gpt2
 from tk.utils.data.tokenizer import special_tokens
 
-exps_todo = ['+', '-']
+sym2op = {
+    '+': lambda a, b: a+b, 
+    '-': lambda a, b: a-b,
+    '*': lambda a, b: a*b,
+}
+exps_todo = ['+', '-', '*']
 exp_tokens = [k for k in exps_todo]
 
-vocab = list(special_tokens.values()) + list('0123456789=') + exp_tokens
+# make numbers correspond to their integer encoding
+vocab = list(it.chain('0123456789=', special_tokens.values(), exp_tokens))
 id2chr = {k:v for k, v in enumerate(vocab)}
 chr2id = {v:k for k, v in id2chr.items()}
 rprint('Planning: ', exps_todo)
@@ -186,10 +219,6 @@ def create_train_test(
     return train_data, test_data
 
 
-sym2op = {
-    '+': lambda a, b: a+b, 
-    '-': lambda a, b: a-b,
-}
 operations=[Op(k,sym2op[k]) for k in exps_todo]
 logger.info([(o.symbol, o(1, 2)) for o in operations])
 # %%
@@ -462,9 +491,6 @@ state = create_train_state(
 data = get_stats(state)
 print(data['stats'])
 # %%
-import itertools as it
-
-
 def joint_keys(*dicts: dict):
     keys = set(it.chain(*dicts))
     return sorted(keys)
@@ -538,33 +564,9 @@ stat_history = []
 rng, dkey = random.split(rng)
 min_loss = -1, 9999, state.params
 max_acc = -1, 0, state.params
+max_acc_eval = -1, 0, state.params
 # %%
-class Saver:
-    def __init__(self, model):
-        self.crit2model = {
-            'train_loss': model,
-            'train_acc': model,
-            'eval_acc': model,
-        }
-        self.crit2val = {
-            'train_loss': 99999,
-            'train_acc': 0,
-            'eval_acc': 0,
-        }
 
-    def __call__(self, metrics, model):
-        for k, v in self.crit2val.items():
-            crit = (
-                'acc' in k and v > metrics[k] or
-                'loss' in k and v < metrics[k]
-            )
-            if crit:
-                self.crit2val = metrics[k]
-                self.crit2model = model
-        return self
-
-
-# %%
 def eval_step(x, y, mask, model, params):
     (x, xvis) = x
     logits = model.apply(
@@ -575,25 +577,29 @@ def eval_step(x, y, mask, model, params):
         rngs={'dropout': rng}  # unused? can we skip?
     )
     yhat = logits.argmax(-1)
-    #print(yhat.shape)
-    #print(yhat[:, [2, 3]])
+    # NOTE expect ['<bos>' '+' '=' '1' '<eos>' '<pad>]
+    sel = lambda xs: xs[:, [2, 3]]
+    masksel = sel(mask)
+    eqs = (sel(yhat) == sel(y)) * masksel
+    eqs_row = eqs.sum(-1) 
     metrics = dict(
-        # NOTE expect "<bos>+=1<pad>"
-        # prediction for next token is at ix 4
-        acc = ((yhat[:, [2, 3]] == y[:, [2, 3]]) * mask[:, [2, 3]]).sum() / mask[:, [2,3]].sum(),
-        acc_all = (yhat == y).sum() / mask.sum(),
+        ixs_correct = jnp.where(
+            eqs_row == masksel.sum(-1))[0],
+        ixs_incorrect = jnp.where(
+            eqs_row != masksel.sum(-1))[0],
+        acc = eqs.sum() / masksel.sum(),
+        acc_all = ((yhat == y) * mask).sum() / mask.sum(),
         loss = cross_entropy_loss(logits, y, mask)
     )
     return yhat, metrics
 
 
-num_epochs = 50
+num_epochs = 2
 cur_epoch = len(stat_history)
 for epoch in range(cur_epoch, cur_epoch + num_epochs):
     state, loss = train_step(
         exp.train.x, exp.train.y, exp.train.mask, state, dropout_key=rng)
     data = get_stats(state)
-    # data['loss'] = loss
     train_yhat, train_metrics = eval_step(
         exp.train.x, exp.train.y, exp.train.mask, model, params=state.params)
     eval_yhat, eval_metrics = eval_step(
@@ -604,12 +610,17 @@ for epoch in range(cur_epoch, cur_epoch + num_epochs):
         print('Saving[loss]@', loss)
         min_loss = (epoch, loss, state.params.copy())
     if (acc := data['train']['acc_all']) > max_acc[1]:
-        print('Saving[acca]@', acc)
+        print('Saving[aa_train]@', acc)
+        max_acc = (epoch, acc, state.params.copy())
+    if (acc := data['eval']['acc_all']) > max_acc_eval[1]:
+        print('Saving[aa_eval]@', acc)
         max_acc = (epoch, acc, state.params.copy())
     stat_history.append(data)
     print(f"Epoch {epoch+1}, Loss: {loss:.4f}")
 
 
+# %%
+fails = stat_history[-1]['eval']['ixs_incorrect']
 # %%
 import matplotlib.pyplot as plt
 import matplotlib.colors as mrgb
@@ -661,14 +672,19 @@ zipped = tree_zip(*(x['stats'] for x in stat_history[-5:]))
 deltas_over_epochs = jax.tree.map(
     diff, zipped, is_leaf=lambda x: isinstance(x, (tuple, list)))
 
-get_chart(deltas_over_epochs)
+# get_chart(deltas_over_epochs)
+get_chart({
+    k:np.abs(v) for k, v in deltas_over_epochs.items() if 
+    any(x not in ''.join(k) for x in ('ln', ))
+})
 # %%
-get_chart({k:v for k, v in deltas_over_epochs.items() if 
+get_chart({
+    k:v for k, v in deltas_over_epochs.items() if 
     any(x in k for x in ('wpe', 'wte'))
 })
 # %%
-deltas_over_epochs.keys()
-total_change = jax.tree.reduce(lambda a, b: abs(a) + abs(b), deltas_over_epochs)
+total_change = jax.tree.reduce(
+    lambda a, b: abs(a) + abs(b), deltas_over_epochs)
 print(total_change)
 # %%
 # params = state.params
@@ -676,21 +692,20 @@ print(total_change)
 bound_model = model.bind(
     {'params': params}, 
     rngs={'dropout': rng})
+# %%
+rprint(id2chr)
+# %%
+import treescope  # comes with penzai
 x, xvis = exp.train.x
 train_preds = bound_model(x, xvis, train=False)
 print(train_preds.shape)
-# %%
 probs_train = (
     # NOTE expect "<bos>+=1<pad>"
     nn.softmax(train_preds)[:, [2, 3]]
     #+ nn.softmax(train_preds)[:, 2]
 )
 print('after', len(stat_history), 'epochs')
-
-# %%
-import treescope  # comes with penzai
 treescope.render_array(probs_train)
-
 # %%
 import treescope
 x, xvis = exp.test.x
@@ -699,5 +714,4 @@ print(test_preds.shape)
 probs_test = nn.softmax(test_preds[:, [2,3]])
 print('after', len(stat_history), 'epochs')
 treescope.render_array(probs_test)
-
 # %%
