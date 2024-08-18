@@ -17,10 +17,10 @@ class Xy(NamedTuple):
 
 mnist_default_dir = datadir / "MNIST" / "raw"
 mnist_locs = [
-    'https://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz',
-    'https://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz',
-    'https://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz',
-    'https://yann.lecun.com/exdb/mnist/t10k-labels-idx3-ubyte.gz',
+    'https://github.com/mkolod/MNIST/raw/fad0867177cd7fc4ce09091e9344db41c7483ea6/train-images-idx3-ubyte.gz',
+    'https://github.com/mkolod/MNIST/raw/fad0867177cd7fc4ce09091e9344db41c7483ea6/train-labels-idx1-ubyte.gz',
+    'https://github.com/mkolod/MNIST/raw/fad0867177cd7fc4ce09091e9344db41c7483ea6/t10k-images-idx3-ubyte.gz',
+    'https://github.com/mkolod/MNIST/raw/fad0867177cd7fc4ce09091e9344db41c7483ea6/t10k-labels-idx1-ubyte.gz',
 ]
 
 
@@ -39,13 +39,17 @@ def words(lang: str = 'en') -> set[str]:
 def mnist(mnist_dir: str | Path = mnist_default_dir) -> tuple[dict, dict]:
     mnist_dir.mkdir(parents=True, exist_ok=True)
     for loc in mnist_locs:
+        name = loc[loc.rfind('/') + 1:]
+        if  (fout := mnist_dir / name).exists():
+            logger.debug(f"Skipping {fout}")
+            continue
         logger.info(f'Downloading: {loc}\n -> {mnist_dir}')
-        with open(mnist_dir, 'wb') as f:
-            data = fetch(loc)
-            f.write(data)
+        with open(fout, 'wb') as f:
+            if data := fetch(loc):
+                f.write(data)
     return (
-        load_mnist_gzip(mnist_dir, "train"), 
-        load_mnist_gzip("t10k"),
+        load_mnist_gzip(which="train", data_dir=mnist_dir), 
+        load_mnist_gzip(which="t10k", data_dir=mnist_dir),
     )
 
 
