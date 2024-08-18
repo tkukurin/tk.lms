@@ -1,6 +1,12 @@
+# %%
 """WIP, almost the same objective as in singleModel but w/ MNIST digits.
 """
 # %%
+# %load_ext autoreload
+# %autoreload 2
+
+# %%
+import tqdm
 try: from rich import print as rprint
 except: rprint  = print
 
@@ -17,9 +23,13 @@ import tk.utils as u
 from pathlib import Path
 from loguru import logger
 
-from tk.utils.data.fetch import load_mnist_gzip
-dataset = load_mnist_gzip(which='train')
+from tk.utils.data.fetch import load_mnist_gzip, mnist
+dataset, _ = mnist()
 print({k: v.shape for k, v in dataset._asdict().items()})
+# %%
+import jax
+print(jax.devices())
+
 # %%
 import joblib
 
@@ -567,7 +577,14 @@ max_acc = -1, 0, state.params
 max_acc_eval = -1, 0, state.params
 # %%
 
-def eval_step(x, y, mask, model, params):
+def eval_step(x, y, mask, params, n=None):
+    """
+    n specifies batchsize (y.shape[0]).
+    NB, only needed for jitting because we are using `jnp.where` in the code.
+    TODO maybe I can do this outside of the fn, surely can be nicer.
+
+    cf. https://jax.readthedocs.io/en/latest/errors.html#jax.errors.ConcretizationTypeError
+    """
     (x, xvis) = x
     logits = model.apply(
         {'params': params}, 
@@ -584,10 +601,9 @@ def eval_step(x, y, mask, model, params):
     eqs_row = eqs.sum(-1) 
     metrics = dict(
         ixs_correct = jnp.where(
-            eqs_row == masksel.sum(-1))[0],
+            eqs_row == masksel.sum(-1), size=n)[0],
         ixs_incorrect = jnp.where(
-            eqs_row != masksel.sum(-1))[0],
-        # NB this is token level accuracy
+            eqs_row != masksel.sum(-1), size=n)[0],
         acc = eqs.sum() / masksel.sum(),
         acc_all = ((yhat == y) * mask).sum() / mask.sum(),
         loss = cross_entropy_loss(logits, y, mask)
@@ -595,30 +611,34 @@ def eval_step(x, y, mask, model, params):
     return yhat, metrics
 
 
-num_epochs = 1000
+# NB, size is needed for static compilation.
+n = exp.train.y.shape[0]
+train_step_jit = jax.jit(train_step)
+eval_step_jit = jax.jit(ft.partial(eval_step, n=n))
+# %%
+num_epochs = 2
 cur_epoch = len(stat_history)
-for epoch in range(cur_epoch, cur_epoch + num_epochs):
-    state, loss = train_step(
-        exp.train.x, exp.train.y, exp.train.mask, state, dropout_key=rng)
-    data = get_stats(state)
-    train_yhat, train_metrics = eval_step(
-        exp.train.x, exp.train.y, exp.train.mask, model, params=state.params)
-    eval_yhat, eval_metrics = eval_step(
-        exp.test.x, exp.test.y, exp.test.mask, model, params=state.params)
-    data['train'] = train_metrics
-    data['eval'] = eval_metrics
-    if loss < min_loss[1]:
-        print('Saving[loss]@', loss)
-        min_loss = (epoch, loss, state.params.copy())
-    if (acc := data['train']['acc_all']) > max_acc[1]:
-        print('Saving[aa_train]@', acc)
-        max_acc = (epoch, acc, state.params.copy())
-    if (acc := data['eval']['acc_all']) > max_acc_eval[1]:
-        print('Saving[aa_eval]@', acc)
-        max_acc_eval = (epoch, acc, state.params.copy())
-    stat_history.append(data)
-    print(f"Epoch {epoch+1}, Loss: {loss:.4f}")
-
+with tqdm.trange(cur_epoch, cur_epoch + num_epochs) as epochs:
+    for epoch in epochs:
+        state, loss = train_step_jit(
+            exp.train.x, exp.train.y, exp.train.mask, state, dropout_key=rng)
+        data = get_stats(state)
+        train_yhat, train_metrics = eval_step_jit(
+            exp.train.x, exp.train.y, exp.train.mask, params=state.params)
+        eval_yhat, eval_metrics = eval_step_jit(
+            exp.test.x, exp.test.y, exp.test.mask, params=state.params)
+        data['train'] = train_metrics
+        data['eval'] = eval_metrics
+        saved = []
+        if loss < min_loss[1]:
+            min_loss = (epoch, loss, state.params.copy())
+        if (acc := data['train']['acc_all']) > max_acc[1]:
+            max_acc = (epoch, acc, state.params.copy())
+        if (acc := data['eval']['acc_all']) > max_acc_eval[1]:
+            max_acc_eval = (epoch, acc, state.params.copy())
+        stat_history.append(data)
+        saved = f'[l]@{min_loss[1]:.2f} [at]@{max_acc[1]:.2f} [ae]{max_acc_eval[1]:.2f}'
+        epochs.set_postfix_str(f"l={loss:.3f} {saved}")
 
 # %%
 fails = stat_history[-1]['eval']['ixs_incorrect']
