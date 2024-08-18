@@ -33,9 +33,8 @@ def memo(f: Callable, **kw):
 
 def fetch(url: str) -> bytes:
     logger.debug(f"Downloading: {url}")
-
     if not (got := requests.get(url)).ok:
-        logger.warn("some error downloading")
+        logger.warning(f"some error downloading: {got}")
         return None
     else:
         data = got.content
