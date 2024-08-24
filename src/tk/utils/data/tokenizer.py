@@ -5,6 +5,8 @@ import tempfile
 from loguru import logger
 from typing import Iterable
 
+from tokenizers.processors import TemplateProcessing
+
 special_tokens = {
     'eos_token': '<eof>',
     'sep_token': '<eof>',
@@ -12,6 +14,7 @@ special_tokens = {
     'bos_token': '<bof>',
     'unk_token': '<unk>',
 }
+CFG_DEFAULT = transformers.GPT2Config()
 
 
 def mkvocab(texts: Iterable, special_tokens: set = set(special_tokens.values())) -> dict:
@@ -23,18 +26,23 @@ def mkvocab(texts: Iterable, special_tokens: set = set(special_tokens.values()))
     return vocab
 
 
-def mktokenizer_base(data, special_tokens: set = set(special_tokens.values())) -> toklib.BaseTokenizer:
-    # uniq = sorted(set(''.join(data)))
-    # logger.info(vocab_full := list(
-    #     set(special_tokens) | set(uniq)))
+def mktokenizer_base(data, special_tokens: dict = special_tokens) -> toklib.BaseTokenizer:
     tokenizer = toklib.CharBPETokenizer(
-        # vocab={k: i for i, k in enumerate(special_tokens)},
         suffix="",
     )
+    # TODO https://discuss.huggingface.co/t/add-bos-and-eos-when-encoding-a-sentence/21833
+    tokenizer.post_processor = TemplateProcessing(
+        single=special_tokens['bos_token'] + " $A " + special_tokens['eos_token'],
+        special_tokens=[
+            (special_tokens['bos_token'], 0),
+            (special_tokens['eos_token'], 1),
+        ],
+    )
+
     tokenizer.train_from_iterator(
         data,
         # vocab_size=len(vocab_full),
-        special_tokens=list(special_tokens),
+        special_tokens=list(set(special_tokens.values())),
         min_frequency=5,
         # initial_alphabet=list(special_tokens),
         suffix="",
@@ -42,8 +50,8 @@ def mktokenizer_base(data, special_tokens: set = set(special_tokens.values())) -
     return tokenizer
 
 
-def mktokenizer(data, config, max_len=512, special_tokens: dict = special_tokens):
-    tokenizer = mktokenizer_base(data, set(special_tokens.values()))
+def mktokenizer(data, config = CFG_DEFAULT, max_len=512, special_tokens: dict = special_tokens):
+    tokenizer = mktokenizer_base(data, special_tokens)
     with tempfile.TemporaryDirectory() as tmpdir:
         config.save_pretrained(tmpdir)
         tokenizer.save(f"{tmpdir}/tokenizer.json")
