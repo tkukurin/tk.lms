@@ -20,6 +20,7 @@ dependencies = [
     "networkx",
     "scikit-learn",
     "numpy",
+    "matplotlib",
     "scipy",
     "pandas",
     "einops",
