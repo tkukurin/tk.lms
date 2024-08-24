@@ -13,6 +13,7 @@ dependencies = [
     "datasets",
     "diskcache",
     "rich",
+    "jax[cuda]",
     "bitsandbytes",
     "ipykernel",
     "networkx",
