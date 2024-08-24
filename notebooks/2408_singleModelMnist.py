@@ -616,7 +616,7 @@ n = exp.train.y.shape[0]
 train_step_jit = jax.jit(train_step)
 eval_step_jit = jax.jit(ft.partial(eval_step, n=n))
 # %%
-num_epochs = 2
+num_epochs = 200
 cur_epoch = len(stat_history)
 with tqdm.trange(cur_epoch, cur_epoch + num_epochs) as epochs:
     for epoch in epochs:
@@ -649,7 +649,6 @@ sh = np.array([0, 25, -10])
 plt.imshow(np.hstack(np.vstack(Xvis_fails[sh])), cmap='gray')
 plt.axis('off')
 plt.tight_layout()
-# %%
 # %%
 import matplotlib.pyplot as plt
 import matplotlib.colors as mrgb
@@ -743,4 +742,48 @@ print(test_preds.shape)
 probs_test = nn.softmax(test_preds[:, [2,3]])
 print('after', len(stat_history), 'epochs')
 treescope.render_array(probs_test)
+# %%
+probs_test_wrong = stat_history[-1]['eval']['ixs_incorrect']
+#probs_test_wrong = probs_test.arg
+# %%
+test_y = exp.test.y[:, [2, 3]]
+masksel = exp.test.mask[:, [2, 3]]
+eqs_row = (test_y == probs_test.argmax(-1)).sum(-1)
+eqs_row
+# %%
+ixs_correct = jnp.where(
+    eqs_row == masksel.sum(-1))[0]
+ixs_incorrect = jnp.where(
+    eqs_row != masksel.sum(-1))[0]
+print(ixs_correct.shape, ixs_incorrect.shape)
+# %%
+
+def plot_topks(probs_train):
+    plt.hist(
+        probs_train[:, 0, :].max(-1), 
+        histtype='barstacked',
+        alpha=.5,)
+    plt.hist(
+        probs_train[:, 1, :].max(-1), 
+        histtype='barstacked',
+        alpha=.5,
+        )
+    plt.show()
+
+    topk, topk_ixs = jax.lax.top_k(probs_train[:, 0, :], 3)
+    for i in range(3):
+        plt.hist(
+            topk[:, i],
+            histtype='barstacked',
+            label=f"topk={i}",
+            alpha=.5,
+        )
+    plt.legend()
+    plt.show()
+
+# %%
+plot_topks(probs_test[ixs_incorrect])
+# %%
+plot_topks(probs_test[ixs_correct])
+
 # %%
