@@ -619,6 +619,7 @@ eval_step_jit = jax.jit(ft.partial(eval_step, n=n))
 # %%
 from matplotlib.axes import Axes
 
+
 def plot_tops(probs, ixs: tuple=(0,), ax: Axes=None):
     ax = ax or plt.gca()
     for ix in ixs:
@@ -627,6 +628,7 @@ def plot_tops(probs, ixs: tuple=(0,), ax: Axes=None):
             histtype='barstacked',
             alpha=.5,)
     return ax
+
 
 def plot_topks(
     probs, ix: int = 3,
@@ -655,15 +657,34 @@ train_yhat, train_probs, train_metrics = eval_step_jit(
     exp.train.x, exp.train.y, exp.train.mask, params=state.params)
 # %%
 # %%
+import tk
 from aim import Run, Distribution, Image, Figure, Figures, Metric, Text
-run = Run(
-    capture_terminal_logs=True,
-)
+
+
+def guard_run(new_instance: Run, force: bool = False) -> Run:
+    if old_run := globals().get('run'):
+        print(f"{old_run=}")
+        if not force:
+            print('NOTE: run already there, returning cached.')
+            return old_run
+        else:
+            print('Found run, backing up and finalizing, rm with `del __run`')
+            globals()['__run'] = old_run
+            old_run.finalize()
+    run = new_instance
+    print(f"{run=}")
+    return run
+
+
+run = guard_run(Run(repo=tk.rootdir, capture_terminal_logs=True))
+
+# %%
 fig, ax = plot_topks(train_probs)
 # Tracking a matplotlib object using "aim.Figure" might not behave as
 # expected.In such cases, consider tracking with "aim.Image".
 aimfig = Image(fig)
 run.track(aimfig, 't1_probs', 0, 0, context={"subset": "train"})
+# %%
 # %%
 import pandas as pd
 # install nbformat>=4.2.0 for mimetypes!
