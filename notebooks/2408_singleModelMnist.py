@@ -779,7 +779,8 @@ with tqdm.trange(cur_epoch, cur_epoch + num_epochs) as epochs:
         log_everything(ProgressCtx("train", epoch), train_probs, train_metrics)
         log_everything(ProgressCtx("eval", epoch), eval_probs, eval_metrics)
         if (epoch + 1) % 200 == 0:
-            run.track(Image(plot_stat_history(stat_history)), "stat_history", epoch=epoch)
+            fig, ax = plot_stat_history(stat_history)
+            run.track(Image(fig), "stat_history", epoch=epoch)
         saved = []
         if loss < min_loss[1]:
             min_loss = (epoch, loss, state.params.copy())
