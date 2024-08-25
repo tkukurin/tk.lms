@@ -172,6 +172,21 @@ print(labelize(*encode(sample, 16)))
 print(decode(encode(sample)[0]))
 
 
+def nonoverlap_traintest(
+    fst_from: tuple, 
+    snd_from: tuple, 
+    operations: tuple[Op],
+    train_split: float = 0.8,
+    rng: np.random.RandomState = np.random,
+):
+    combos = it.product(fst_from, snd_from)
+    alls = list(set(op(a, b) for op in operations for a, b in combos))
+    ixs = list(range(len(alls)))
+    rng.shuffle(ixs)
+    train_split = int(train_split * len(ixs))
+    return alls[:train_split], alls[train_split:]
+
+
 def create_train_test(
     l2img: dict[int, np.ndarray],
     fst_from: tuple = (0, ),
@@ -181,7 +196,9 @@ def create_train_test(
     operations: tuple[Op] = (
         Op('+', lambda *xs: sum(xs)),
     ),
-    rng: np.random.RandomState = np.random
+    rng: np.random.RandomState = np.random,
+    train_sums: tuple | None = None,
+    test_sums: tuple | None = None,
 ) -> tuple:
     train_data = defaultdict(list)
     test_data = defaultdict(list)
@@ -200,31 +217,32 @@ def create_train_test(
             xtxt, ytxt, mtxt = labelize(*encode(
                 f'{op.symbol}={label}', maxlen=8
             ))
-
-            train_data[label].append(Data(
-                imgs_fst[ixs_fst[:ntrain]], 
-                imgs_snd[ixs_snd[:ntrain]],
-                np.array(fst), 
-                np.array(snd),
-                ixs_fst[:ntrain],
-                ixs_snd[:ntrain],
-                xtxt=xtxt[None, ...],
-                ytxt=ytxt[None, ...],
-                mask=mtxt[None, ...],
-                op=f'{fst}{op.symbol}{snd}',
-            ))
-            test_data[label].append(Data(
-                imgs_fst[ixs_fst[ntrain:]], 
-                imgs_snd[ixs_snd[ntrain:]],
-                np.array(fst), 
-                np.array(snd),
-                ixs_fst[ntrain:], 
-                ixs_snd[ntrain:],
-                xtxt=xtxt[None, ...],
-                ytxt=ytxt[None, ...],
-                mask=mtxt[None, ...],
-                op=f'{fst}{op.symbol}{snd}',
-            ))
+            if (not train_sums) or label in train_sums:
+                train_data[label].append(Data(
+                    imgs_fst[ixs_fst[:ntrain]], 
+                    imgs_snd[ixs_snd[:ntrain]],
+                    np.array(fst), 
+                    np.array(snd),
+                    ixs_fst[:ntrain],
+                    ixs_snd[:ntrain],
+                    xtxt=xtxt[None, ...],
+                    ytxt=ytxt[None, ...],
+                    mask=mtxt[None, ...],
+                    op=f'{fst}{op.symbol}{snd}',
+                ))
+            if (not test_sums) or label in test_sums:
+                test_data[label].append(Data(
+                    imgs_fst[ixs_fst[ntrain:]], 
+                    imgs_snd[ixs_snd[ntrain:]],
+                    np.array(fst), 
+                    np.array(snd),
+                    ixs_fst[ntrain:], 
+                    ixs_snd[ntrain:],
+                    xtxt=xtxt[None, ...],
+                    ytxt=ytxt[None, ...],
+                    mask=mtxt[None, ...],
+                    op=f'{fst}{op.symbol}{snd}',
+                ))
         
     return train_data, test_data
 
@@ -232,7 +250,24 @@ def create_train_test(
 operations=[Op(k,sym2op[k]) for k in exps_todo]
 logger.info([(o.symbol, o(1, 2)) for o in operations])
 # %%
-train, test = create_train_test(l2img, operations=operations)
+fst_from: tuple = (0, )
+snd_from: tuple = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+train_sums, test_sums = nonoverlap_traintest(
+    fst_from, snd_from, operations)
+assert len(train_sums) > len(test_sums)
+assert not set(train_sums).intersection(test_sums)
+# %%
+train, test = create_train_test(
+    l2img, 
+    fst_from=fst_from,
+    snd_from=snd_from,
+    operations=operations,
+    train_sums=train_sums,
+    test_sums=test_sums,
+)
+assert set(train) == set(train_sums)
+assert set(test) == set(test_sums)
+# %%
 print()
 safe_shape = lambda x: getattr(x, 'shape', None)
 print(jax.tree.map(safe_shape, train))
@@ -317,54 +352,6 @@ def tensorize_all_lst(datas: dict[int, Data]):
 Xvis, Xtext, ytext, mask = tensorize_all_lst(train)
 print(Xvis.shape)
 print(Xtext.shape, ytext.shape)
-
-# %%
-import numpy as np
-
-# TODO for later
-def put_in_correct_place(
-    text: np.ndarray, img: np.ndarray, 
-    ixs_text: np.ndarray, ixs_img: np.ndarray
-) -> np.ndarray:
-    max_len = max(np.max(ixs_text), np.max(ixs_img)) + 1
-    result = np.empty(max_len, dtype=text.dtype)
-    result[ixs_text] = text
-    result[ixs_img] = img
-    return result
-
-
-text = np.array(['a', 'b', 'c'])
-img = np.array(['x', 'y', 'z'])
-ixs_text = np.array([0, 2, 4])
-ixs_img = np.array([1, 3, 5])
-
-result = put_in_correct_place(text, img, ixs_text, ixs_img)
-print(result)  # Output: ['a', 'x', 'b', 'y', 'c', 'z']
-
-# %%
-
-model = gpt2.GPT(gpt2.GPTConfig(
-    block_size=16,
-    # NB output nan if vocab size is wrong
-    vocab_size=max(id2chr) + 1,  # TODO figure out
-    num_layers=4,
-    num_heads=12,
-    num_embeds=768
-))
-print(model.config.vocab_size)
-print(Xtext)
-rng = jax.random.PRNGKey(42)
-rng, trng = jax.random.split(rng)
-train_state = create_train_state(trng, model, 1e-4)
-params = train_state.params
-rng, mrng = jax.random.split(rng)
-print(logits := model.apply(
-    {"params": params}, 
-    #jnp.array([[0, 15, 1, 0, ]]),
-    Xtext[0:1, ...], 
-    #img=Xvis[0:1, ...],
-    rngs={'dropout': mrng}))
-#print(logits.shape)
 
 # %%
 from flax import linen as nn
@@ -656,7 +643,6 @@ def plot_topks(
 train_yhat, train_probs, train_metrics = eval_step_jit(
     exp.train.x, exp.train.y, exp.train.mask, params=state.params)
 # %%
-# %%
 import tk
 from aim import Run, Distribution, Image, Figure, Figures, Metric, Text
 
@@ -676,7 +662,10 @@ def guard_run(new_instance: Run, force: bool = False) -> Run:
     return run
 
 
-run = guard_run(Run(repo=tk.rootdir, capture_terminal_logs=True))
+run = guard_run(Run(
+    repo=tk.rootdir, capture_terminal_logs=True,
+    experiment="singleModelMnist"
+))
 # %%
 import pandas as pd
 # install nbformat>=4.2.0 for mimetypes!
@@ -777,8 +766,9 @@ with tqdm.trange(cur_epoch, cur_epoch + num_epochs) as epochs:
             exp.test.x, exp.test.y, exp.test.mask, params=state.params)
         data['train'] = train_metrics
         data['eval'] = eval_metrics
-        log_everything(ProgressCtx("train", epoch), train_probs, train_metrics)
-        log_everything(ProgressCtx("eval", epoch), eval_probs, eval_metrics)
+        with plt.ioff():
+            log_everything(ProgressCtx("train", epoch), train_probs, train_metrics)
+            log_everything(ProgressCtx("eval", epoch), eval_probs, eval_metrics)
         if (epoch + 1) % 200 == 0:
             fig, ax = plot_stat_history(stat_history)
             run.track(Image(fig), "stat_history", epoch=epoch)
