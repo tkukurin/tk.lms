@@ -677,35 +677,18 @@ def guard_run(new_instance: Run, force: bool = False) -> Run:
 
 
 run = guard_run(Run(repo=tk.rootdir, capture_terminal_logs=True))
-
-# %%
-fig, ax = plot_topks(train_probs)
-# Tracking a matplotlib object using "aim.Figure" might not behave as
-# expected.In such cases, consider tracking with "aim.Image".
-aimfig = Image(fig)
-run.track(aimfig, 't1_probs', 0, 0, context={"subset": "train"})
-# %%
 # %%
 import pandas as pd
 # install nbformat>=4.2.0 for mimetypes!
 import plotly.express as px
 import plotly.graph_objects as go
-ix = 3
-subset = "train"
-plot = px.histogram(df := pd.DataFrame({
-    id2chr[i]: train_probs[:, ix, i].tolist()
-    for i in range(train_probs.shape[-1])
-}), title=f"Distribution of token {ix} ({subset})")
-plot
-#run.track(Figure(plot), 't0_probs', 0, 0, context={"subset": "train"})
-# %%
-run.track(Text())
-# %%
-train_yhat, train_probs, train_metrics = eval_step_jit(
-    exp.train.x, exp.train.y, exp.train.mask, params=state.params)
-eval_yhat, eval_probs, eval_metrics = eval_step_jit(
-    exp.test.x, exp.test.y, exp.test.mask, params=state.params)
-# %%
+import matplotlib.pyplot as plt
+import matplotlib.colors as mrgb
+
+clist = list(mrgb.TABLEAU_COLORS)
+from matplotlib.axes import Axes
+
+
 class ProgressCtx(NamedTuple):
     name: str
     epoch: int
@@ -718,13 +701,6 @@ class ProgressCtx(NamedTuple):
             context=dict(subset=self.name),
             epoch=self.epoch, 
             step=self.step)
-
-
-import matplotlib.pyplot as plt
-import matplotlib.colors as mrgb
-
-clist = list(mrgb.TABLEAU_COLORS)
-from matplotlib.axes import Axes
 
 
 def plot_stat_history(stat_history: list[dict]):
@@ -780,7 +756,11 @@ def log_everything(ctx: ProgressCtx, probs: jnp.ndarray, metrics: dict):
     run.track(metrics["acc_all"], "accuracy over all tokens", **ctx.aim)
     return plot
 
-
+# %%
+train_yhat, train_probs, train_metrics = eval_step_jit(
+    exp.train.x, exp.train.y, exp.train.mask, params=state.params)
+eval_yhat, eval_probs, eval_metrics = eval_step_jit(
+    exp.test.x, exp.test.y, exp.test.mask, params=state.params)
 log_everything(ProgressCtx("train", 0, 0), train_probs, train_metrics)
 log_everything(ProgressCtx("eval", 0, 0), eval_probs, eval_metrics)
 # %%

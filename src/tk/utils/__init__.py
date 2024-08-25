@@ -1,4 +1,4 @@
-from . import data
+from . import data, log
 from .utils import (
     memo,
     fetch
@@ -6,6 +6,7 @@ from .utils import (
 
 __all__ = [
     'data',
+    'log',
     'memo', 
     'fetch'
 ]
