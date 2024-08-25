@@ -1,0 +1,3 @@
+[submodule "src/tk/incontext"]
+	path = src/tk/incontext
+	url = https://github.com/tkukurin/emergent_in_context_learning.git
