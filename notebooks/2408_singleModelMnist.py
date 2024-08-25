@@ -74,12 +74,10 @@ sym2op = {
 }
 exps_todo = ['+', '-', '*']
 exp_tokens = [k for k in exps_todo]
-
 # make numbers correspond to their integer encoding
 vocab = list(it.chain('0123456789=', special_tokens.values(), exp_tokens))
 id2chr = {k:v for k, v in enumerate(vocab)}
 chr2id = {v:k for k, v in id2chr.items()}
-rprint('Planning: ', exps_todo)
 rprint(id2chr)
 # %%
 from collections import defaultdict
@@ -179,8 +177,11 @@ def nonoverlap_traintest(
     train_split: float = 0.8,
     rng: np.random.RandomState = np.random,
 ):
-    combos = it.product(fst_from, snd_from)
-    alls = list(set(op(a, b) for op in operations for a, b in combos))
+    alls = set()
+    for op in operations:
+        combos = it.product(fst_from, snd_from)
+        alls |= set(op(a, b) for a, b in combos)
+    alls = list(alls)
     ixs = list(range(len(alls)))
     rng.shuffle(ixs)
     train_split = int(train_split * len(ixs))
@@ -257,8 +258,10 @@ train_sums, test_sums = nonoverlap_traintest(
 assert len(train_sums) > len(test_sums)
 assert not set(train_sums).intersection(test_sums)
 # %%
-test_sums.add(chosen := np.random.choice(train_sums))
-print(f'Added {chosen=} to test')
+if len(set(train_sums).intersection(test_sums)) == 0:
+    test_sums.append(chosen := np.random.choice(train_sums))
+    print(f'Added {chosen=} to test')
+print(f'{set(test_sums).intersection(train_sums)=}')
 # %%
 train, test = create_train_test(
     l2img, 
@@ -659,16 +662,17 @@ def guard_run(new_instance: Run, force: bool = False) -> Run:
         else:
             print('Found run, backing up and finalizing, rm with `del __run`')
             globals()['__run'] = old_run
-            old_run.finalize()
+            print(f'{old_run.finalize()=}')
     run = new_instance
     print(f"{run=}")
     return run
 
 
 run = guard_run(Run(
-    repo=tk.rootdir, capture_terminal_logs=True,
+    repo=tk.rootdir,
+    capture_terminal_logs=True,
     experiment="singleModelMnist"
-))
+), force=True)
 # %%
 import pandas as pd
 # install nbformat>=4.2.0 for mimetypes!
@@ -733,7 +737,7 @@ def plot_stat_history(stat_history: list[dict]):
     ax4.tick_params(axis='y', color=clist[3], labelcolor=clist[3])
 
     ax1.set_title(exp.name)
-    return fig, ax
+    return fig, grid
 
 
 def log_everything(ctx: ProgressCtx, probs: jnp.ndarray, metrics: dict):
