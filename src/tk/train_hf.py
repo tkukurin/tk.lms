@@ -42,6 +42,8 @@ from typing import Callable, Optional
 import datasets
 import jax
 import jax.numpy as jnp
+
+from tk.utils.log import get_logger_write_method
 # https://github.com/google/jax/blob/e3e08601840e7af05daa9fdf2c5a0f56777b5c90/docs/jax_array_migration.md?plain=1#L119
 # problems with huggingface typing otherwise, and other libs
 # https://github.com/huggingface/transformers/issues/25417
@@ -305,30 +307,7 @@ def data_loader(rng: jax.random.PRNGKey, dataset: Dataset, batch_size: int, shuf
         yield batch
 
 
-def get_track_method(summary_writer):
-    """I switched to aim from tensorboard for now.
-
-    TODO this will need to be removed if aim proves ok to use.
-    For now just leave the hackish method around.
-    """
-    try: 
-        import aim
-        if isinstance(summary_writer, aim.Run):
-            # order consistent w tensorflow
-            add = lambda tag, val, step: summary_writer.track(
-                val, name=tag, step=step
-            )
-    except ImportError:
-        if hasattr(summary_writer, 'add_scalar'):
-            add = summary_writer.add_scalar
-        else:
-            add = summary_writer.scalar
-
-    return add
-
-
-def write_train_metric(summary_writer, train_metrics, train_time, step):
-    add = get_track_method(summary_writer)
+def write_train_metric(add, train_metrics, train_time, step):
     add("train_time", train_time, step)
     train_metrics = get_metrics(train_metrics)
     for key, vals in train_metrics.items():
@@ -337,8 +316,7 @@ def write_train_metric(summary_writer, train_metrics, train_time, step):
             add(tag, val, step - len(vals) + i + 1)
 
 
-def write_eval_metric(summary_writer, eval_metrics, step):
-    add = get_track_method(summary_writer)
+def write_eval_metric(add, eval_metrics, step):
     for metric_name, value in eval_metrics.items():
         add(f"eval_{metric_name}", value, step)
 
@@ -639,26 +617,7 @@ def main(cfg: DictConfig):
             eval_dataset = eval_dataset.select(range(max_eval_samples))
 
     if jax.process_index() == 0:
-        try:
-            import aim
-            import tk
-            summary_writer = aim.Run(repo=tk.rootdir)
-        except ImportError as ie:
-            logger.warning(
-                f"Unable to display metrics through aim because some package are not installed: {ie}"
-            )
-            try:
-                from tensorboardX import SummaryWriter
-                # requires tensorflow import ?!
-                # from flax.metrics.tensorboard import SummaryWriter
-
-                summary_writer = SummaryWriter(
-                    log_dir=Path(output_dir))
-            except ImportError as ie:
-                summary_writer = None
-                logger.warning(
-                    f"Unable to display metrics through TensorBoard because some package are not installed: {ie}"
-                )
+        track = get_logger_write_method(output_dir)
 
     rng = jax.random.PRNGKey(training_args.seed)
     rng, dropout_rng = jax.random.split(rng)
@@ -796,8 +755,9 @@ def main(cfg: DictConfig):
             if cur_step % training_args.logging_steps == 0 and cur_step > 0:
                 train_metric = unreplicate(train_metric)
                 train_time += time.time() - train_start
-                if summary_writer and jax.process_index() == 0:
-                    write_train_metric(summary_writer, train_metrics, train_time, cur_step)
+                if track and jax.process_index() == 0:
+                    write_train_metric(
+                        track, train_metrics, train_time, cur_step)
 
                 epochs.write(
                     f"Step... ({cur_step} | Loss: {train_metric['loss'].mean()}, Learning Rate:"
@@ -835,8 +795,7 @@ def main(cfg: DictConfig):
                 epochs.write(desc)
                 epochs.desc = desc
                 if summary_writer and jax.process_index() == 0:
-                    write_eval_metric(
-                        summary_writer, eval_metrics, cur_step)
+                    write_eval_metric(track, eval_metrics, cur_step)
 
             if cur_step % training_args.save_steps == 0 and cur_step > 0 and jax.process_index() == 0:
                 params = jax.device_get(unreplicate(state.params))
