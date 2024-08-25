@@ -43,7 +43,9 @@ import datasets
 import jax
 import jax.numpy as jnp
 # https://github.com/google/jax/blob/e3e08601840e7af05daa9fdf2c5a0f56777b5c90/docs/jax_array_migration.md?plain=1#L119
-# problems with huggingface typing otherwise
+# problems with huggingface typing otherwise, and other libs
+# https://github.com/huggingface/transformers/issues/25417
+# https://github.com/luchris429/popjaxrl/issues/1
 setattr(jnp, 'DeviceArray', jax.Array)
 import numpy as np
 import optax
@@ -303,11 +305,30 @@ def data_loader(rng: jax.random.PRNGKey, dataset: Dataset, batch_size: int, shuf
         yield batch
 
 
+def get_track_method(summary_writer):
+    """I switched to aim from tensorboard for now.
+
+    TODO this will need to be removed if aim proves ok to use.
+    For now just leave the hackish method around.
+    """
+    try: 
+        import aim
+        if isinstance(summary_writer, aim.Run):
+            # order consistent w tensorflow
+            add = lambda tag, val, step: summary_writer.track(
+                val, name=tag, step=step
+            )
+    except ImportError:
+        if hasattr(summary_writer, 'add_scalar'):
+            add = summary_writer.add_scalar
+        else:
+            add = summary_writer.scalar
+
+    return add
+
+
 def write_train_metric(summary_writer, train_metrics, train_time, step):
-    if hasattr(summary_writer, 'add_scalar'):
-        add = summary_writer.add_scalar
-    else:
-        add = summary_writer.scalar
+    add = get_track_method(summary_writer)
     add("train_time", train_time, step)
     train_metrics = get_metrics(train_metrics)
     for key, vals in train_metrics.items():
@@ -317,10 +338,7 @@ def write_train_metric(summary_writer, train_metrics, train_time, step):
 
 
 def write_eval_metric(summary_writer, eval_metrics, step):
-    if hasattr(summary_writer, 'add_scalar'):
-        add = summary_writer.add_scalar
-    else:
-        add = summary_writer.scalar
+    add = get_track_method(summary_writer)
     for metric_name, value in eval_metrics.items():
         add(f"eval_{metric_name}", value, step)
 
@@ -620,24 +638,27 @@ def main(cfg: DictConfig):
                 len(eval_dataset), data_args.max_eval_samples)
             eval_dataset = eval_dataset.select(range(max_eval_samples))
 
-    has_tensorboard = is_tensorboard_available()
-    if has_tensorboard and jax.process_index() == 0:
+    if jax.process_index() == 0:
         try:
-            from tensorboardX import SummaryWriter
-            # requires tensorflow import ?!
-            # from flax.metrics.tensorboard import SummaryWriter
-
-            summary_writer = SummaryWriter(
-                log_dir=Path(output_dir))
+            import aim
+            import tk
+            summary_writer = aim.Run(repo=tk.rootdir)
         except ImportError as ie:
-            has_tensorboard = False
             logger.warning(
-                f"Unable to display metrics through TensorBoard because some package are not installed: {ie}"
+                f"Unable to display metrics through aim because some package are not installed: {ie}"
             )
-    else:
-        logger.warning(
-            "Please run `pip install tensorboardx`."
-        )
+            try:
+                from tensorboardX import SummaryWriter
+                # requires tensorflow import ?!
+                # from flax.metrics.tensorboard import SummaryWriter
+
+                summary_writer = SummaryWriter(
+                    log_dir=Path(output_dir))
+            except ImportError as ie:
+                summary_writer = None
+                logger.warning(
+                    f"Unable to display metrics through TensorBoard because some package are not installed: {ie}"
+                )
 
     rng = jax.random.PRNGKey(training_args.seed)
     rng, dropout_rng = jax.random.split(rng)
@@ -775,7 +796,7 @@ def main(cfg: DictConfig):
             if cur_step % training_args.logging_steps == 0 and cur_step > 0:
                 train_metric = unreplicate(train_metric)
                 train_time += time.time() - train_start
-                if has_tensorboard and jax.process_index() == 0:
+                if summary_writer and jax.process_index() == 0:
                     write_train_metric(summary_writer, train_metrics, train_time, cur_step)
 
                 epochs.write(
@@ -813,7 +834,7 @@ def main(cfg: DictConfig):
                 )
                 epochs.write(desc)
                 epochs.desc = desc
-                if has_tensorboard and jax.process_index() == 0:
+                if summary_writer and jax.process_index() == 0:
                     write_eval_metric(
                         summary_writer, eval_metrics, cur_step)
 
