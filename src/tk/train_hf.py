@@ -2,24 +2,23 @@
 
 I prefer using Hydra:
 ```bash
+base=data/outputs/prepro/summing \
 python src/tk/train_hf.py \
-    +data.train_file=data/train_one_doubledigit.csv \
-    +data.validation_file=data/valid_one_doubledigit.csv \
+    +data.train_file=$base/train_one_doubledigit.csv \
+    +data.block_size=8 \
+    +data.validation_file=$base/valid_one_doubledigit.csv \
     +train.per_device_train_batch_size=8 \
     +train.per_device_eval_batch_size=8 \
+    +train.num_train_epochs=750 \
+    +train.do_train=true \
+    +train.do_eval=true \
+    +model.config_name=$base \
+    +model.tokenizer_name=$base \
+    model.kwargs.n_layer=4 \
+    model.kwargs.n_head=4 \
+    model.kwargs.n_embd=32 \
+    model.kwargs.max_len=16 \
     #
-```
-
-Old syntax:
-```bash
-python src/tk/train_hf.py \
-        --train_file data/train_one_doubledigit.csv \
-        --validation_file data/valid_one_doubledigit.csv \
-        --output_dir data/outputs/summing_train/ \
-        --model_name_or_path data/outputs/summing \
-        --do_train \
-        --do_eval \
-        # 
 ```
 
 [based on]: https://github.com/huggingface/transformers/blob/main/examples/flax/language-modeling/run_clm_flax.py
@@ -43,6 +42,9 @@ from typing import Callable, Optional
 import datasets
 import jax
 import jax.numpy as jnp
+# https://github.com/google/jax/blob/e3e08601840e7af05daa9fdf2c5a0f56777b5c90/docs/jax_array_migration.md?plain=1#L119
+# problems with huggingface typing otherwise
+setattr(jnp, 'DeviceArray', jax.Array)
 import numpy as np
 import optax
 from datasets import Dataset, load_dataset
@@ -64,6 +66,7 @@ from transformers import (
     set_seed,
 )
 from transformers.testing_utils import CaptureLogger
+
 
 MODEL_CONFIG_CLASSES = list(FLAX_MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)

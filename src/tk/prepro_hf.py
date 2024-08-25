@@ -81,21 +81,22 @@ def main(cfg: Cfg):
     return config, tokenizer
 
 
-if False:  # running as notebook ... 
-    output_dir = tk.datadir / "outputs" / "prepro/summing"
-    output_dir.mkdir(exist_ok=True, parents=True)
-    main(
-        Cfg(
-            output_dir=output_dir
-        )
-    )
-
 # %%
 if __name__ == '__main__':
-    import hydra
+    if tk.in_ipy:
+        print("Detected notebook, running without Hydra")
+        output_dir = tk.datadir / "outputs" / "prepro/summing"
+        output_dir.mkdir(exist_ok=True, parents=True)
+        main(
+            Cfg(
+                output_dir=output_dir
+            )
+        )
+    else:
+        import hydra
 
-    wrap = hydra.main(
-        version_base="1.3", 
-        config_path="configs", 
-        config_name="prepro.yaml")
-    wrap(main)()
+        wrap = hydra.main(
+            version_base="1.3", 
+            config_path="configs", 
+            config_name="prepro.yaml")
+        wrap(main)()
