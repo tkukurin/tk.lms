@@ -257,6 +257,9 @@ train_sums, test_sums = nonoverlap_traintest(
 assert len(train_sums) > len(test_sums)
 assert not set(train_sums).intersection(test_sums)
 # %%
+test_sums.add(chosen := np.random.choice(train_sums))
+print(f'Added {chosen=} to test')
+# %%
 train, test = create_train_test(
     l2img, 
     fst_from=fst_from,
