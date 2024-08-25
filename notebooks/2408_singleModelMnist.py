@@ -593,6 +593,7 @@ def eval_step(x, y, mask, params, n=None):
         train=False, 
         rngs={'dropout': rng}  # unused? can we skip?
     )
+    probs = nn.softmax(logits, axis=-1)
     yhat = logits.argmax(-1)
     # NOTE expect ['<bos>' '+' '=' '1' '<eos>' '<pad>]
     sel = lambda xs: xs[:, [2, 3]]
@@ -608,13 +609,159 @@ def eval_step(x, y, mask, params, n=None):
         acc_all = ((yhat == y) * mask).sum() / mask.sum(),
         loss = cross_entropy_loss(logits, y, mask)
     )
-    return yhat, metrics
+    return yhat, probs, metrics
 
 
 # NB, size is needed for static compilation.
 n = exp.train.y.shape[0]
 train_step_jit = jax.jit(train_step)
 eval_step_jit = jax.jit(ft.partial(eval_step, n=n))
+# %%
+from matplotlib.axes import Axes
+
+def plot_tops(probs, ixs: tuple=(0,), ax: Axes=None):
+    ax = ax or plt.gca()
+    for ix in ixs:
+        ax.hist(
+            probs[:, ix, :].max(-1), 
+            histtype='barstacked',
+            alpha=.5,)
+    return ax
+
+def plot_topks(
+    probs, ix: int = 3,
+    ax: Axes | None = None,
+    variant: str = "train"
+):
+    if ax is None:
+        fig, ax = plt.subplots(nrows=2, ncols=1)
+    topk, topk_ixs = jax.lax.top_k(probs[:, ix, :], 3)
+    chars = [id2chr[i] for ixs in topk_ixs.tolist() for i in ixs]
+    ax[1].hist(chars, histtype='bar', alpha=.5)
+    ax[1].set_title('characters predicted')
+    for i in range(3):
+        ax[0].hist(
+            topk[:, i],
+            histtype='barstacked',
+            label=f"{i}",
+            alpha=.5,
+        )
+    ax[0].legend()
+    ax[0].set_title(f"Proba distribution @ {variant}({ix})")
+    fig.tight_layout()
+    return fig, ax
+
+train_yhat, train_probs, train_metrics = eval_step_jit(
+    exp.train.x, exp.train.y, exp.train.mask, params=state.params)
+# %%
+# %%
+from aim import Run, Distribution, Image, Figure, Figures, Metric, Text
+run = Run(
+    capture_terminal_logs=True,
+)
+fig, ax = plot_topks(train_probs)
+# Tracking a matplotlib object using "aim.Figure" might not behave as
+# expected.In such cases, consider tracking with "aim.Image".
+aimfig = Image(fig)
+run.track(aimfig, 't1_probs', 0, 0, context={"subset": "train"})
+# %%
+import pandas as pd
+# install nbformat>=4.2.0 for mimetypes!
+import plotly.express as px
+import plotly.graph_objects as go
+ix = 3
+subset = "train"
+plot = px.histogram(df := pd.DataFrame({
+    id2chr[i]: train_probs[:, ix, i].tolist()
+    for i in range(train_probs.shape[-1])
+}), title=f"Distribution of token {ix} ({subset})")
+plot
+#run.track(Figure(plot), 't0_probs', 0, 0, context={"subset": "train"})
+# %%
+run.track(Text())
+# %%
+train_yhat, train_probs, train_metrics = eval_step_jit(
+    exp.train.x, exp.train.y, exp.train.mask, params=state.params)
+eval_yhat, eval_probs, eval_metrics = eval_step_jit(
+    exp.test.x, exp.test.y, exp.test.mask, params=state.params)
+# %%
+class ProgressCtx(NamedTuple):
+    name: str
+    epoch: int
+    step: int | None = None
+
+    @property 
+    def aim(self):
+        """log for run as kwargs, `run.track(**ctx.aim)`."""
+        return dict(
+            context=dict(subset=self.name),
+            epoch=self.epoch, 
+            step=self.step)
+
+
+import matplotlib.pyplot as plt
+import matplotlib.colors as mrgb
+
+clist = list(mrgb.TABLEAU_COLORS)
+from matplotlib.axes import Axes
+
+
+def plot_stat_history(stat_history: list[dict]):
+    fig, grid = plt.subplots(
+        nrows=2, ncols=1)
+
+    ax1 = grid[0]
+    ax1.set_ylabel('loss', color=clist[0])
+    ax1.plot([x['train']['loss'] for x in stat_history], color=clist[0], label='train')
+    ax1.plot([x['eval']['loss'] for x in stat_history], color=clist[0], label='eval', linestyle='dashed')
+    ax1.legend()
+    ax1.tick_params(axis='y', labelcolor=clist[0])
+
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('acc', color=clist[1])
+    ax2.plot([x['train']['acc'] for x in stat_history], color=clist[1], label='train')
+    ax2.plot([x['eval']['acc'] for x in stat_history], color=clist[1], label='eval', linestyle='dashed')
+    ax2.legend()
+    ax2.tick_params(axis='y', labelcolor=clist[1])
+    ax2.set_yticks(np.arange(10 + 1) / 10)
+
+    ax3 = grid[1]
+    ax3.set_ylabel('diff', color=clist[2])
+    ax3.tick_params(axis='y', color=clist[2], labelcolor=clist[2])
+    total_change_per_epoch = np.array([
+        np.mean([mu for mu, var in x['stats'].values()])
+        for x in stat_history
+    ])
+    total_var_per_epoch = np.array([
+        np.mean([abs(var) for mu, var in x['stats'].values()])
+        for x in stat_history
+    ])
+    ax3.plot(total_change_per_epoch, color=clist[2])
+
+    ax4 = ax3.twinx()
+    ax4.plot(total_var_per_epoch, color=clist[3])
+    ax4.set_ylabel('var', color=clist[3])
+    ax4.tick_params(axis='y', color=clist[3], labelcolor=clist[3])
+
+    ax1.set_title(exp.name)
+    return fig, ax
+
+
+def log_everything(ctx: ProgressCtx, probs: jnp.ndarray, metrics: dict):
+    ix = 3
+    plot = px.histogram(df := pd.DataFrame({
+        id2chr[i]: probs[:, ix, i].tolist()
+        for i in range(train_probs.shape[-1])
+    }), title=f"Distribution of token {ix} ({ctx.name})")
+    run.track(Figure(plot), "probs", **ctx.aim)
+    run.track(metrics["acc"], "accuracy", **ctx.aim)
+    run.track(metrics["loss"], "loss", **ctx.aim)
+    run.track(metrics["acc_all"], "accuracy over all tokens", **ctx.aim)
+    return plot
+
+
+log_everything(ProgressCtx("train", 0, 0), train_probs, train_metrics)
+log_everything(ProgressCtx("eval", 0, 0), eval_probs, eval_metrics)
 # %%
 num_epochs = 200
 cur_epoch = len(stat_history)
@@ -623,12 +770,16 @@ with tqdm.trange(cur_epoch, cur_epoch + num_epochs) as epochs:
         state, loss = train_step_jit(
             exp.train.x, exp.train.y, exp.train.mask, state, dropout_key=rng)
         data = get_stats(state)
-        train_yhat, train_metrics = eval_step_jit(
+        train_yhat, train_probs, train_metrics = eval_step_jit(
             exp.train.x, exp.train.y, exp.train.mask, params=state.params)
-        eval_yhat, eval_metrics = eval_step_jit(
+        eval_yhat, eval_probs, eval_metrics = eval_step_jit(
             exp.test.x, exp.test.y, exp.test.mask, params=state.params)
         data['train'] = train_metrics
         data['eval'] = eval_metrics
+        log_everything(ProgressCtx("train", epoch), train_probs, train_metrics)
+        log_everything(ProgressCtx("eval", epoch), eval_probs, eval_metrics)
+        if (epoch + 1) % 200 == 0:
+            run.track(Image(plot_stat_history(stat_history)), "stat_history", epoch=epoch)
         saved = []
         if loss < min_loss[1]:
             min_loss = (epoch, loss, state.params.copy())
@@ -650,51 +801,8 @@ plt.imshow(np.hstack(np.vstack(Xvis_fails[sh])), cmap='gray')
 plt.axis('off')
 plt.tight_layout()
 # %%
-import matplotlib.pyplot as plt
-import matplotlib.colors as mrgb
-
-clist = list(mrgb.TABLEAU_COLORS)
-from matplotlib.axes import Axes
-
-fig, grid = plt.subplots(
-    nrows=2, ncols=1)
-
-ax1 = grid[0]
-ax1.set_ylabel('loss', color=clist[0])
-ax1.plot([x['train']['loss'] for x in stat_history], color=clist[0], label='train')
-ax1.plot([x['eval']['loss'] for x in stat_history], color=clist[0], label='eval', linestyle='dashed')
-ax1.legend()
-ax1.tick_params(axis='y', labelcolor=clist[0])
-
-ax2 = ax1.twinx()
-ax2.set_ylabel('acc', color=clist[1])
-ax2.plot([x['train']['acc'] for x in stat_history], color=clist[1], label='train')
-ax2.plot([x['eval']['acc'] for x in stat_history], color=clist[1], label='eval', linestyle='dashed')
-ax2.legend()
-ax2.tick_params(axis='y', labelcolor=clist[1])
-ax2.set_yticks(np.arange(10 + 1) / 10)
-
-ax3 = grid[1]
-ax3.set_ylabel('diff', color=clist[2])
-ax3.tick_params(axis='y', color=clist[2], labelcolor=clist[2])
-total_change_per_epoch = np.array([
-    np.mean([mu for mu, var in x['stats'].values()])
-    for x in stat_history
-])
-total_var_per_epoch = np.array([
-    np.mean([abs(var) for mu, var in x['stats'].values()])
-    for x in stat_history
-])
-ax3.plot(total_change_per_epoch, color=clist[2])
-
-ax4 = ax3.twinx()
-ax4.plot(total_var_per_epoch, color=clist[3])
-ax4.set_ylabel('var', color=clist[3])
-ax4.tick_params(axis='y', color=clist[3], labelcolor=clist[3])
-
-ax1.set_title(exp.name)
+fig, ax = plot_stat_history(stat_history)
 plt.show()
-
 # %%
 zipped = tree_zip(*(x['stats'] for x in stat_history[-5:]))
 deltas_over_epochs = jax.tree.map(
@@ -757,29 +865,6 @@ ixs_incorrect = jnp.where(
     eqs_row != masksel.sum(-1))[0]
 print(ixs_correct.shape, ixs_incorrect.shape)
 # %%
-
-def plot_topks(probs_train):
-    plt.hist(
-        probs_train[:, 0, :].max(-1), 
-        histtype='barstacked',
-        alpha=.5,)
-    plt.hist(
-        probs_train[:, 1, :].max(-1), 
-        histtype='barstacked',
-        alpha=.5,
-        )
-    plt.show()
-
-    topk, topk_ixs = jax.lax.top_k(probs_train[:, 0, :], 3)
-    for i in range(3):
-        plt.hist(
-            topk[:, i],
-            histtype='barstacked',
-            label=f"topk={i}",
-            alpha=.5,
-        )
-    plt.legend()
-    plt.show()
 
 # %%
 plot_topks(probs_test[ixs_incorrect])
