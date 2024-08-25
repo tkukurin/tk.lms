@@ -20,7 +20,11 @@ def get_logger_write_method(output_dir: Path) -> Callable:
     try:
         import aim
         import tk
-        run = aim.Run(repo=tk.rootdir)
+        experiment = None
+        for base in (tk.datadir, tk.datadir / "outputs"):
+            if output_dir.is_relative_to(base):
+                experiment = output_dir.relative_to(base).parts[0]
+        run = aim.Run(repo=tk.rootdir, experiment=experiment)
         # TODO at some point other setup etc 
         # https://aimstack.readthedocs.io/en/latest/using/artifacts.html
         # run.set_artifacts_uri("s3://aim/artifacts/")
@@ -41,6 +45,7 @@ def get_logger_write_method(output_dir: Path) -> Callable:
             )
             return (lambda *a, **kw: logger.info(f"{a=} {kw=}"))
 
+    logger.info(f'{run=}')
     return _get_track_method(run)
 
 
