@@ -325,18 +325,6 @@ def create_train_state(
     return TrainState.create(
         apply_fn=model.apply, params=params, tx=tx)
 
-
-model = gpt2.GPTWithVision(gpt2.GPTConfig(
-    block_size=16,
-    vocab_size=len(chr2id),
-    num_layers=4,
-    num_heads=12,
-    num_embeds=768
-))
-rng = jax.random.PRNGKey(42)
-rng, trng = jax.random.split(rng)
-train_state = create_train_state(trng, model, 1e-4)
-
 # %%
 
 def tensorize_all_lst(datas: dict[int, Data]):
@@ -483,16 +471,6 @@ def get_stats(state: dict) -> dict:
         'stats': stats_flat,
     }
 
-
-# %%
-rng = jax.random.PRNGKey(0)
-state = create_train_state(
-    rng, 
-    model, 
-    learning_rate=5e-5, 
-)
-data = get_stats(state)
-print(data['stats'])
 # %%
 def joint_keys(*dicts: dict):
     keys = set(it.chain(*dicts))
@@ -544,7 +522,7 @@ state = create_train_state(
     (model := gpt2.GPTWithVision(gpt2.GPTConfig(
         block_size=16,
         vocab_size=max(id2chr) + 1,
-        num_embeds=256,
+        num_embeds=768,
         num_layers=8,
         num_heads=4,
         dropout_rate=0.1,
@@ -553,7 +531,6 @@ state = create_train_state(
     learning_rate=5e-5
 )
 # %%
-
 Xvis, Xtext, ytext, Xmask = tensorize_all_lst(train)
 xtvis, xttext, yttext, xtmask = tensorize_all_lst(test)
 exp = Exp(
@@ -561,7 +538,6 @@ exp = Exp(
     train=Enc(x=(Xtext, Xvis), y=ytext, mask=Xmask, raw=None),
     test=Enc(x=(xttext, xtvis), y=yttext, mask=xtmask, raw=None),
 )
-
 # %%
 stat_history = []
 rng, dkey = random.split(rng)
@@ -589,6 +565,7 @@ def eval_step(x, y, mask, params, n=None):
     probs = nn.softmax(logits, axis=-1)
     yhat = logits.argmax(-1)
     # NOTE expect ['<bos>' '+' '=' '1' '<eos>' '<pad>]
+    # (since the images are embedded as prefix)
     sel = lambda xs: xs[:, [2, 3]]
     masksel = sel(mask)
     eqs = (sel(yhat) == sel(y)) * masksel
@@ -664,6 +641,7 @@ def guard_run(new_instance: Run, force: bool = False) -> Run:
             globals()['__run'] = old_run
             print(f'{old_run.finalize()=}')
     run = new_instance
+    run["hparams"] = dcls.asdict(model.config)
     print(f"{run=}")
     return run
 
@@ -672,7 +650,7 @@ run = guard_run(Run(
     repo=tk.rootdir,
     capture_terminal_logs=True,
     experiment="singleModelMnist"
-), force=True)
+))
 # %%
 import pandas as pd
 # install nbformat>=4.2.0 for mimetypes!
