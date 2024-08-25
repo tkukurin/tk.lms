@@ -3,8 +3,7 @@ import os
 
 from pathlib import Path
 from . import utils
-from .utils.utils import memo, fetch, datadir, timed
-
+from .utils.utils import memo, fetch, rootdir, datadir, timed
 
 in_colab = 'google.colab' in sys.modules
 try: in_ipy = get_ipython() is not None
