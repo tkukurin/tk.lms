@@ -14,7 +14,7 @@ dependencies = [
     "datasets",
     "diskcache",
     "rich",
-    "jax[cuda]",
+    "jax",  # todo cuda?
     "bitsandbytes",
     "ipykernel",
     "networkx",
@@ -28,16 +28,17 @@ dependencies = [
     "pytest",
     "loguru",
     "tokenizers",
-    "hydra-core>=1.3.2,<2",
-    "penzai>=0.2.1,<0.3",
-    "xminigrid>=0.9.0,<0.10",
-    "tensorboardx>=2.6.2.2",
+    "hydra-core",
+    "penzai",
+    "xminigrid",
+    # "tensorboardx",
     # better experiment tracking (I think...)
     "aim>=3.24.0",
     # AIM requires plotly for `Figure`s
     "plotly>=5.23.0",
     # install for mimetypes!
     "nbformat>=4.2.0",
+    "openai",
 ]
 
 [tool.pixi.project]
