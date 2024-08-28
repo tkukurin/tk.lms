@@ -1,5 +1,5 @@
-import torch
-from torch.utils.data import DataLoader
+try: from torch.utils.data import DataLoader
+except: DataLoader = object
 
 
 class InfiniteDataLoader(DataLoader):
