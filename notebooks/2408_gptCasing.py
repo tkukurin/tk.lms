@@ -8,6 +8,7 @@ Also see [howard].
 """
 # %%
 from collections import defaultdict
+from rich import print as rprint
 
 import tqdm
 import tk
@@ -23,7 +24,12 @@ with Path("~/.apikeys.json").expanduser().open() as f:
   key = json.load(f)['openai-self']
   client = openai.Client(api_key=key)
 seed = 42
+
+# NOTE this neatly lets you add new examples below without extra API calls
+# don't forget it's CACHING RESPONSES tho.
+# DON'T DO MONTE CARLO EXPERIMENTATION
 query = memo(client.chat.completions.create)
+
 # %%
 import itertools as it
 import numpy as np
@@ -65,9 +71,11 @@ questions = {
         "are there gray swans?",
         "is blue better than yellow?",
         "are flortls more lucrative than wollys?",
+        "is brunch before lunch in terms of taste?",
     ],
     "n": [
         "is lunch before brunch?",
+        "on opposite day, is lunch before brunch?",
         "is the tallest building in the world over 1 lightyear high?",
         "is the smallest building in the world over 1km high?",
         "is the smallest building in the world over 1km high?",
@@ -90,8 +98,6 @@ for (q, gt), variant in tqdm.tqdm(it.product(kvs, variants)):
   )
   responses.append(Out(input_, response))
 
-# %%
-print(type(responses[-1]))
 # %%
 str2r = defaultdict(list)
 for r in responses:
@@ -124,12 +130,11 @@ xs = tree.map(as_tps, str2r, is_leaf=ii(Out))
 # %%
 vals, defn = tree.flatten(xs, is_leaf=ii(OutTok))
 # %%
-print(vals)
+rprint(vals[:3])
 # interestingly, variants of the following emerge:
 # 1. ("yes", " yes", ...)  # note the space in 2nd resp
 # 2. ("yes", "no", ...)
 # %%
-from rich import print as rprint
 vals: list[OutTok]
 uncertain = [
     x
@@ -138,7 +143,7 @@ uncertain = [
     != str(x.tps[1].token).strip().lower()
 ]
 rprint("Uncertain, as defined by yes/no two top-answers:")
-rprint(uncertain)
+rprint(sorted(uncertain, key=lambda x: x.tps[0].prob))
 # %% analysis says:
 # idk, seems the ambiguous questions kinda depend on casing
 # TODO: construct more ambiguous questions => test
