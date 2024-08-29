@@ -78,4 +78,7 @@ xs = tree.map(fmt, xs, is_leaf=leafn)
 vals, defn = tree.flatten(xs, is_leaf=lambda x: isinstance(x, list) and leafn(x[0]))
 # %%
 print(vals)
+# interestingly, variants of the following emerge:
+# 1. ("yes", " yes", ...)
+# 2. ("yes", "no", ...)
 # %%
