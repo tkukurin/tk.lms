@@ -142,8 +142,14 @@ uncertain = [
     if str(x.tps[0].token).strip().lower()
     != str(x.tps[1].token).strip().lower()
 ]
-rprint("Uncertain, as defined by yes/no two top-answers:")
-rprint(sorted(uncertain, key=lambda x: x.tps[0].prob))
+# %%
+import plotly.express as px
+sorteds = sorted(uncertain, key=lambda x: x.tps[0].prob)
+px.bar(
+    [x.ref.input.gt for x in sorteds],
+    color=[x.tps[0].prob for x in sorteds],
+    title="Uncertain (per top-two differing answers)"
+)
 # %% analysis says:
 # idk, seems the ambiguous questions kinda depend on casing
 # TODO: construct more ambiguous questions => test
