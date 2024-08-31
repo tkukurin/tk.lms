@@ -36,9 +36,16 @@ dependencies = [
     "aim>=3.24.0",
     # AIM requires plotly for `Figure`s
     "plotly>=5.23.0",
+    "kaleido",  # plotly to img
     # install for mimetypes!
     "nbformat>=4.2.0",
     "openai",
+
+    # idk just seems cool for presentation
+    "traceback-with-variables",
+    # "table-to-ascii",
+
+    "ipywidgets",
 ]
 
 [tool.pixi.project]
