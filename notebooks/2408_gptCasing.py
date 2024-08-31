@@ -260,6 +260,11 @@ str2r_ambig = stratify_yn(responses_ambig)
 print({k:len(v) for k, v in str2r_ambig.items()})
 # HA. I knew it will _have_ to be moralizing for some of them
 # {'no': 49, 'yes': 21, 'unknown': 1, "i can't provide medical advice. please consult a healthcare professional": 1, 'yes/no': 2, 'i cannot provide medical advice. please consult a healthcare professional': 1}
+
+# TODO: there's something interesting here to investigate.
+# something something weight of RLHF perhaps?
+# i.e. the more medical questions are overridden despite my instructions.
+# the other "ambiguous" cases are not
 # %%
 print({k: v for k, v in str2r_ambig.items() if k not in ("yes", "no")})
 # %%
