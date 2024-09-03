@@ -46,6 +46,9 @@ dependencies = [
     # "table-to-ascii",
 
     "ipywidgets",
+
+    # to check quickly train-test overlap levels
+    "rapidfuzz",
 ]
 
 [tool.pixi.project]
