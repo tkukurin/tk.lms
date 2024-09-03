@@ -1,5 +1,6 @@
 import transformers
 import tokenizers.implementations as toklib
+from tokenizers.implementations import CharBPETokenizer
 import tempfile
 
 from loguru import logger
@@ -27,9 +28,7 @@ def mkvocab(texts: Iterable, special_tokens: set = set(special_tokens.values()))
 
 
 def mktokenizer_base(data, special_tokens: dict = special_tokens) -> toklib.BaseTokenizer:
-    tokenizer = toklib.CharBPETokenizer(
-        suffix="",
-    )
+    tokenizer = CharBPETokenizer(suffix="")
     # TODO https://discuss.huggingface.co/t/add-bos-and-eos-when-encoding-a-sentence/21833
     tokenizer.post_processor = TemplateProcessing(
         single=special_tokens['bos_token'] + " $A " + special_tokens['eos_token'],
@@ -50,8 +49,11 @@ def mktokenizer_base(data, special_tokens: dict = special_tokens) -> toklib.Base
     return tokenizer
 
 
-def mktokenizer(data, config = CFG_DEFAULT, max_len=512, special_tokens: dict = special_tokens):
-    tokenizer = mktokenizer_base(data, special_tokens)
+def tokenizers_to_auto_tokenizer(
+    tokenizer, 
+    config = CFG_DEFAULT,
+    max_len: int = 512
+) -> transformers.PreTrainedTokenizerBase:
     with tempfile.TemporaryDirectory() as tmpdir:
         config.save_pretrained(tmpdir)
         tokenizer.save(f"{tmpdir}/tokenizer.json")
@@ -68,5 +70,17 @@ def mktokenizer(data, config = CFG_DEFAULT, max_len=512, special_tokens: dict = 
     logger.info(f"{tokenizer.model_max_length=}")
     logger.info(f"{tokenizer.vocab=}")
     logger.info(f"{tokenizer.special_tokens_map=}")
+    return config, tokenizer
+
+
+def mktokenizer(
+    data, 
+    config = CFG_DEFAULT, 
+    max_len=512, 
+    special_tokens: dict = special_tokens
+):
+    tokenizer = mktokenizer_base(data, special_tokens)
+    config, tokenizer = tokenizers_to_auto_tokenizer(
+        tokenizer, max_len)
     return config, tokenizer
         
