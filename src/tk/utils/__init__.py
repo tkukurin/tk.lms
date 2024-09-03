@@ -1,12 +1,14 @@
 from . import data, log
 from .utils import (
     memo,
-    fetch
+    fetch,
+    L
 )
 
 __all__ = [
     'data',
     'log',
     'memo', 
-    'fetch'
+    'fetch',
+    'L'
 ]
