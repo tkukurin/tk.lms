@@ -47,6 +47,7 @@ dependencies = [
     # to check quickly train-test overlap levels
     "rapidfuzz",
     "tiktoken>=0.8.0",
+    "dm-pix>=0.4.3",
 ]
 
 [project.optional-dependencies]
