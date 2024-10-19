@@ -5,7 +5,6 @@ import jax
 import jax.numpy as jnp
 import optax
 from transformers import FlaxGPT2LMHeadModel, GPT2Tokenizer, GPT2Config
-from transformers.models.gpt2.modeling_flax_gpt2 import FlaxGPT2Model
 
 # tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 # tokenizer.pad_token = tokenizer.eos_token
@@ -61,7 +60,13 @@ print(inputs.input_ids.max())
 # NB, source of nasty bugs!!
 print(len(tokenizer.get_vocab()), tokenizer.vocab_size)
 # %%
-def get_batch(data, rng, batch_size=8, block_size=tokenizer.model_max_length):
+def get_batch(
+    data,
+    rng: jax.Array,
+    batch_size: int = 8,
+    block_size: int = tokenizer.model_max_length,
+    return_meta: bool = False,
+) -> jnp.ndarray | tuple[jnp.ndarray, dict]:
     # NB, in theory when dealing with small data this is actually really important
     # i.e. we will never sample (len(data) - block_size) to len(data)
     ix = jax.random.randint(
@@ -69,10 +74,12 @@ def get_batch(data, rng, batch_size=8, block_size=tokenizer.model_max_length):
     x = jnp.stack([data[i:i+block_size] for i in ix])
     # we handle this in train_step
     # y = jnp.stack([data[i+1:i+1+block_size] for i in ix])
-    return x
+    return x if not return_meta else (x, {'ix': ix})
 
 
 print(inputs.input_ids.shape)
+import jax
+rng = jax.random.PRNGKey(0)
 print("get_batch:", get_batch(inputs.input_ids.flatten(), rng).shape)
 # %%
 from transformers.models.gpt2 import FlaxGPT2LMHeadModel
@@ -137,7 +144,7 @@ import tk
 import tqdm
 
 close_run = False
-log_dir = tk.datadir / 'logs'
+print("logs in", (log_dir := tk.datadir / 'logs'))
 log_dir.mkdir(parents=True, exist_ok=True)
 
 try:
@@ -182,7 +189,15 @@ for d in data:
     input_ids.append(jnp.array([[tokenizer.eos_token_id]]))
 input_ids = jnp.hstack(input_ids).flatten()
 rng = jax.random.PRNGKey(42)
-
+# %%
+import importlib
+from tk.utils import utils, log
+from collections import Counter
+importlib.reload(utils)
+importlib.reload(log)
+# d = log.Distribution(Counter("aabbc"))
+# print(list(d.storage.items()))
+# from rich import inspect
 # %%
 L.info(f"Inputs: {input_ids.shape}")
 epoch_cum = locals().get('epoch', 0)
@@ -190,13 +205,15 @@ run = locals().get('run')
 assert isinstance(run, aim.Run), f'stuff went awry logging {run=}'
 # not needed since model is handling this
 # train_step_batched = jax.vmap(train_step, in_axes=(None, None, 0, 0))
+idxs_count = Counter()
 with tqdm.trange(epoch_cum, epoch_cum + 20, desc="Epoch") as t:
     for epoch in t:
         rng, batch_rng = jax.random.split(rng)
-        x = get_batch(
+        x, meta = get_batch(
             input_ids,
             rng=batch_rng,
-            batch_size=8
+            batch_size=8,
+            return_meta=True
         )
         rng, train_rng = jax.random.split(rng)
         model.params, opt_state, loss = train_step(
@@ -205,10 +222,15 @@ with tqdm.trange(epoch_cum, epoch_cum + 20, desc="Epoch") as t:
             x,
             train_rng,
         )
+        idxs_count.update(meta['ix'].flatten().tolist())
+        # run['counter'] = idxs_count
+        hist = sorted(idxs_count.items())
+        a, b = hist[0][0], hist[-1][0]
+        run.track(aim.Distribution(hist=[v for k, v in hist], bin_range=(a, b)), name='ix_cum', epoch=epoch)
         run.track(loss, name='loss', epoch=epoch)
         if (epoch + 1) % 10 == 0:
-            t.set_postfix(status="sampling", loss=loss)
             for prompt in ("def", "x ="):
+                t.set_postfix(status=f"sampling '{utils.shrt(prompt)}'", loss=loss)
                 outs = sample_text(prompt)
                 run.track(aim.Text(outs), name='sample', epoch=epoch, context={
                     'prompt': prompt
@@ -224,9 +246,3 @@ text = sample_text("def")
 print("Done.")
 print("=====")
 print(text)
-
-# %%
-ins = tokenizer("def", return_tensors="jax", padding=True, truncation=True, add_special_tokens=False)
-outs = model.generate(**ins)
-# %%
-tokenizer.batch_decode(outs.sequences)
