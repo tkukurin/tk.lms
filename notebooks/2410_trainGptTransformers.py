@@ -155,7 +155,6 @@ print(f"{close_run=}")
 # %%
 L = tk.utils.log.logger
 
-
 def sample_text(prompt: str):
     inputs = tokenizer(
         [prompt],
@@ -170,10 +169,6 @@ def sample_text(prompt: str):
     return tokenizer.decode(
         output_ids[0], skip_special_tokens=True)
 
-
-epoch = locals().get('epoch', 0)
-run = locals().get('run')
-assert isinstance(run, aim.Run), f'stuff went awry logging {run=}'
 # TODO tokenizer should know to handle <EOS> token
 # however it seems to split on < and >, so we need to handle this manually
 input_ids = []
@@ -186,11 +181,16 @@ for d in data:
     input_ids.append(cur_ids)
     input_ids.append(jnp.array([[tokenizer.eos_token_id]]))
 input_ids = jnp.hstack(input_ids).flatten()
+rng = jax.random.PRNGKey(42)
+
+# %%
 L.info(f"Inputs: {input_ids.shape}")
+epoch_cum = locals().get('epoch', 0)
+run = locals().get('run')
+assert isinstance(run, aim.Run), f'stuff went awry logging {run=}'
 # not needed since model is handling this
 # train_step_batched = jax.vmap(train_step, in_axes=(None, None, 0, 0))
-rng = jax.random.PRNGKey(42)
-with tqdm.trange(epoch, epoch + 20, desc="Epoch") as t:
+with tqdm.trange(epoch_cum, epoch_cum + 20, desc="Epoch") as t:
     for epoch in t:
         rng, batch_rng = jax.random.split(rng)
         x = get_batch(
