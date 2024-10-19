@@ -108,7 +108,16 @@ outs = model(
 print(outs.logits.shape)
 assert not jnp.isnan(outs.logits.sum()), "BUG: NaN in logits"
 # %%
-optimizer = optax.adam(1e-4)
+
+import optax
+nepochs = 1000
+lr_schedule = optax.warmup_cosine_decay_schedule(
+    warmup_steps=nepochs // 10,
+    decay_steps=nepochs - nepochs // 10,
+    init_value=1e-7,
+    peak_value=0.001,
+)
+optimizer = optax.adam(learning_rate=lr_schedule)
 opt_state = optimizer.init(model.params)
 
 
@@ -157,6 +166,7 @@ except:  # idk run_.active can fail, maybe bug
 if not (run_ := locals().get('run')):
     print("New run.")
     run = aim.Run(repo=log_dir, experiment='2410_gpt2code')
+    epoch_cum = 0
 
 print(f"{close_run=}")
 # %%
@@ -189,24 +199,33 @@ for d in data:
     input_ids.append(jnp.array([[tokenizer.eos_token_id]]))
 input_ids = jnp.hstack(input_ids).flatten()
 rng = jax.random.PRNGKey(42)
+# def lr_schedule(step: int):
+#     """Linear warmup followed by cosine decay."""
+#     warmup_steps = 1000
+#     if step < warmup_steps:
+#         return step / warmup_steps
+#     progress = (step - warmup_steps) / (10000 - warmup_steps)
+#     return 0.5 * (1.0 + jnp.cos(jnp.pi * progress))
+
 # %%
 import importlib
 from tk.utils import utils, log
 from collections import Counter
 importlib.reload(utils)
 importlib.reload(log)
-# d = log.Distribution(Counter("aabbc"))
-# print(list(d.storage.items()))
-# from rich import inspect
-# %%
 L.info(f"Inputs: {input_ids.shape}")
-epoch_cum = locals().get('epoch', 0)
+epoch_cum = locals().get('epoch_cum', 0)
+step = locals().get('step', 0)
+if epoch_cum == 0: step = 0
 run = locals().get('run')
 assert isinstance(run, aim.Run), f'stuff went awry logging {run=}'
 # not needed since model is handling this
 # train_step_batched = jax.vmap(train_step, in_axes=(None, None, 0, 0))
+nepochs_cur = 50
+if nepochs < nepochs_cur:
+    raise Exception("set nepochs (should be total num epochs)")
 idxs_count = Counter()
-with tqdm.trange(epoch_cum, epoch_cum + 20, desc="Epoch") as t:
+with tqdm.trange(epoch_cum, epoch_cum + nepochs_cur, desc="Epoch") as t:
     for epoch in t:
         rng, batch_rng = jax.random.split(rng)
         x, meta = get_batch(
@@ -228,6 +247,7 @@ with tqdm.trange(epoch_cum, epoch_cum + 20, desc="Epoch") as t:
         a, b = hist[0][0], hist[-1][0]
         run.track(aim.Distribution(hist=[v for k, v in hist], bin_range=(a, b)), name='ix_cum', epoch=epoch)
         run.track(loss, name='loss', epoch=epoch)
+        run.track(lr_schedule(step), name='lr', epoch=epoch)
         if (epoch + 1) % 10 == 0:
             for prompt in ("def", "x ="):
                 t.set_postfix(status=f"sampling '{utils.shrt(prompt)}'", loss=loss)
@@ -235,9 +255,10 @@ with tqdm.trange(epoch_cum, epoch_cum + 20, desc="Epoch") as t:
                 run.track(aim.Text(outs), name='sample', epoch=epoch, context={
                     'prompt': prompt
                 })
-
         t.set_postfix(loss=loss)
+        step += 1
 
+epoch_cum = epoch + 1
 if close_run:
     print("Closing run.")
     run.close()
