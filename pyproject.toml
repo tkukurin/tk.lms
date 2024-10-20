@@ -14,8 +14,8 @@ dependencies = [
     "datasets",
     "diskcache",
     "rich",
-    "jax",  # todo cuda?
-    "bitsandbytes",
+    "jax",
+    # todo cuda?
     "ipykernel",
     "networkx",
     "scikit-learn",
@@ -36,19 +36,27 @@ dependencies = [
     "aim>=3.24.0",
     # AIM requires plotly for `Figure`s
     "plotly>=5.23.0",
-    "kaleido",  # plotly to img
+    # "kaleido",  # plotly to img
     # install for mimetypes!
     "nbformat>=4.2.0",
     "openai",
-
     # idk just seems cool for presentation
     "traceback-with-variables",
     # "table-to-ascii",
-
     "ipywidgets",
-
     # to check quickly train-test overlap levels
     "rapidfuzz",
+    "tiktoken>=0.8.0",
+    "dm-pix>=0.4.3",
+]
+
+[project.optional-dependencies]
+bnb = [
+    # no support for mac?
+    # https://huggingface.co/docs/bitsandbytes/v0.44.1/installation
+    # uv add can't add only for platform?
+    # https://discuss.python.org/t/uv-adds-feature-to-resolve-for-other-platforms/51513
+    "bitsnbytes>=1.0.0",
 ]
 
 [tool.pixi.project]
@@ -61,3 +69,8 @@ tk-llms = { path = ".", editable = true }
 [build-system]
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
