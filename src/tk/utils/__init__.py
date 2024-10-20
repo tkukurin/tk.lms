@@ -8,5 +8,5 @@ __all__ = [
     'data',
     'log',
     'memo', 
-    'fetch'
+    'fetch',
 ]

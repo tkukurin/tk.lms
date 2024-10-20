@@ -57,3 +57,7 @@ platforms = ["linux-64", "osx-arm64"]
 
 [tool.pixi.pypi-dependencies]
 tk-llms = { path = ".", editable = true }
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
