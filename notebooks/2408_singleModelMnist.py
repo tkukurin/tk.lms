@@ -321,6 +321,7 @@ def create_train_state(
         params = model.init(rng, txt=x, img=xvis)['params']
     else:
         params = model.init(rng, x)['params']
+    optax.inject_hyperparams()
     tx = optax.adam(learning_rate)
     return TrainState.create(
         apply_fn=model.apply, params=params, tx=tx)
@@ -756,7 +757,7 @@ with tqdm.trange(cur_epoch, cur_epoch + num_epochs) as epochs:
             log_everything(ProgressCtx("eval", epoch), eval_probs, eval_metrics)
         if (epoch + 1) % 200 == 0:
             fig, ax = plot_stat_history(stat_history)
-            run.track(Image(fig), "stat_history", epoch=epoch)
+            run.track(Image(fig), "stat_history")
         saved = []
         if loss < min_loss[1]:
             min_loss = (epoch, loss, state.params.copy())
@@ -767,6 +768,8 @@ with tqdm.trange(cur_epoch, cur_epoch + num_epochs) as epochs:
         stat_history.append(data)
         saved = f'[l]@{min_loss[1]:.2f} [at]@{max_acc[1]:.2f} [ae]{max_acc_eval[1]:.2f}'
         epochs.set_postfix_str(f"l={loss:.3f} {saved}")
+
+# %%
 
 # %%
 fails = stat_history[-1]['eval']['ixs_incorrect']
