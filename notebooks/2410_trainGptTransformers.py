@@ -170,6 +170,9 @@ if not (run_ := locals().get('run')):
 
 print(f"{close_run=}")
 # %%
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 L = tk.utils.log.logger
 
 def sample_text(prompt: str):
