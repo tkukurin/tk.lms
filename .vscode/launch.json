@@ -5,6 +5,18 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "[EICL] train",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tk.eicl.experiment.experiment",
+            "args": [
+                "--config", "src/tk/eicl/experiment/configs/images_all_exemplars.py",
+                "--logtostderr",
+                "--jaxline_mode", "train"
+            ],
+            "env": {"JAX_DISABLE_JIT": "1"}
+        },
+        {
             "name": "Python Debugger: Current File with Arguments",
             "type": "debugpy",
             "request": "launch",
@@ -24,22 +36,18 @@
                 // various options for multirun
                 // https://hydra.cc/docs/tutorials/basic/running_your_app/multi-run/
                 "--multirun",
-
                 "+data.train_file=data/outputs/prepro_hf/${input:preproDir}/train_one_doubledigit.csv",
                 "+data.validation_file=data/outputs/prepro_hf/${input:preproDir}/valid_one_doubledigit.csv",
                 "+data.block_size=8",
-                
                 "model.kwargs.n_layer=4,8",
                 "model.kwargs.n_head=4,8",
                 "model.kwargs.n_embd=32,64",
                 "model.kwargs.max_len=16",
-
                 "+train.per_device_train_batch_size=8",
                 "+train.per_device_eval_batch_size=8",
                 "+train.num_train_epochs=750",
                 "+train.do_train=true",
                 "+train.do_eval=true",
-
                 "+model.config_name=data/outputs/prepro_hf/${input:preproDir}",
                 "+model.tokenizer_name=data/outputs/prepro_hf/${input:preproDir}",
             ]
@@ -54,18 +62,15 @@
                 "+data.train_file=data/outputs/prepro_hf/${input:preproDir}/train_one_doubledigit.csv",
                 "+data.validation_file=data/outputs/prepro_hf/${input:preproDir}/valid_one_doubledigit.csv",
                 "+data.block_size=8",
-                
                 "model.kwargs.n_layer=12",
                 "model.kwargs.n_head=4",
                 "model.kwargs.n_embd=32",
                 "model.kwargs.max_len=16",
-
                 "+train.per_device_train_batch_size=8",
                 "+train.per_device_eval_batch_size=8",
                 "+train.num_train_epochs=1500",
                 "+train.do_train=true",
                 "+train.do_eval=true",
-
                 "+model.config_name=data/outputs/prepro_hf/${input:preproDir}",
                 "+model.tokenizer_name=data/outputs/prepro_hf/${input:preproDir}",
             ]
@@ -73,14 +78,14 @@
     ],
     "inputs": [
         {
-          "id": "preproDir",
-          "description": "Which dir in preprocess to use for data loading.",
-          "type": "pickString",
-          "default": "0807_2117",
-          "options": [
-            "0807_1941",
-            "0807_2117",
-          ]
+            "id": "preproDir",
+            "description": "Which dir in preprocess to use for data loading.",
+            "type": "pickString",
+            "default": "0807_2117",
+            "options": [
+                "0807_1941",
+                "0807_2117",
+            ]
         }
     ],
 }
