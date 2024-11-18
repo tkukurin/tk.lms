@@ -1,5 +1,9 @@
 import re
 import itertools as it
+import sys
+import pdb
+import traceback
+
 
 import requests
 import diskcache
@@ -74,3 +78,15 @@ def timed(name: Any = "_", show: Callable = L.debug):
     yield val
     val.t1 = time()
     show(f"t ({name}): {val.t1-val.t0:.2f}s")
+
+
+def post_mortem_debug(enable_traceback=True):
+    """Call and enter pdb after an exception occurs globally.
+    """
+    def excepthook(exc_type, exc_value, exc_traceback):
+        if enable_traceback:
+            traceback.print_exception(exc_type, exc_value, exc_traceback)
+        print("\nEntering post-mortem debugging...\n")
+        pdb.post_mortem(exc_traceback)
+
+    sys.excepthook = excepthook
