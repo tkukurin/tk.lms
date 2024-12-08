@@ -1,0 +1,84 @@
+###[sep] id: 0
+model: gemini-flash
+q: Tell me the main novel themes and topics in text. Group IDs together.
+---
+The provided text covers a wide range of topics in machine learning, focusing on several novel themes.  Here's a grouping of related IDs based on common themes:
+
+
+**I. Large Language Models (LLMs) and Alignment:**
+
+* **Alignment and Safety:** 30, 38, 46, 60, 101, 176, 178, 206, 227, 230, 246, 262, 270, 297, 300, 304, 309, 310, 342, 384, 388, 391, 442, 461, 466, 482, 662, 842, 911, 913, 927, 965, 991, 1001, 1046, 1058, 1110, 1176, 1290, 1313, 1315, 1346, 1388, 1391, 1457, 1508, 1516, 1547, 1557, 1628, 1666, 1676, 1766, 1778, 1880, 1891, 1931, 1966, 2005, 2027, 2041, 2060, 2070, 2108, 2121, 2124, 2154, 2177, 2187, 2207, 2265, 2311, 2333, 2368, 2420, 2430, 2442, 2456, 2477, 2487, 2524, 2566, 2574, 2641, 2666, 2679, 2704, 2708, 2713, 2766, 2799, 2800, 2815, 2829, 2842, 2868, 2891, 2966, 2980, 3001, 3006, 3058, 3071, 3087, 3119, 3137, 3188, 3207, 3261, 3278, 3287, 3304, 3347, 3378, 3388, 3401, 3430, 3447, 3461, 3554, 3608, 3641, 3701, 3727, 3782, 3818, 3827, 3847, 3878, 3911, 3947, 3967, 3977, 4006, 4015, 4018, 4041, 4074, 4137, 4167, 4178, 4205, 4207, 4209
+* **LLM Capabilities and Evaluation:** 70, 144, 166, 187, 207, 209, 228, 263, 285, 314, 339, 445, 483, 497, 556, 636, 642, 660, 738, 754, 807, 817, 846, 860, 870, 878, 887, 913, 920, 970, 979, 983, 994, 1006, 1016, 1031, 1054, 1064, 1087, 1102, 1117, 1123, 1144, 1153, 1170, 1180, 1209, 1219, 1230, 1244, 1264, 1277, 1307, 1335, 1345, 1357, 1360, 1373, 1387, 1404, 1407, 1428, 1445, 1462, 1477, 1488, 1497, 1500, 1537, 1547, 1552, 1555, 1567, 1577, 1583, 1602, 1611, 1633, 1660, 1662, 1688, 1692, 1702, 1714, 1728, 1731, 1735, 1743, 1746, 1779, 1796, 1800, 1802, 1810, 1826, 1852, 1870, 1876, 1884, 1906, 1920, 1921, 1934, 1943, 1945, 1957, 1961, 1978, 1980, 1992, 2006, 2020, 2034, 2040, 2041, 2052, 2055, 2058, 2075, 2083, 2111, 2127, 2135, 2152, 2154, 2163, 2181, 2182, 2184, 2202, 2207, 2225, 2238, 2241, 2258, 2261, 2263, 2267, 2271, 2277, 2293, 2307, 2314, 2317, 2322, 2327, 2331, 2334, 2345, 2351, 2352, 2354, 2368, 2372, 2382, 2386, 2391, 2395, 2397, 2401, 2411, 2416, 2430, 2432, 2440, 2442, 2450, 2457, 2471, 2476, 2488, 2491, 2497, 2500, 2506, 2509, 2512, 2517, 2520, 2527, 2529, 2530, 2532, 2547, 2554, 2559, 2560, 2562, 2565, 2566, 2569, 2571, 2574, 2577, 2580, 2584, 2591, 2595, 2602, 2604, 2614, 2620, 2623, 2637, 2658, 2662, 2665, 2675, 2680, 2691, 2696, 2701, 2704, 2714, 2721, 2725, 2734, 2740, 2742, 2744, 2749, 2754, 2757, 2761, 2766, 2770, 2772, 2773, 2788, 2796, 2801, 2805, 2807, 2813, 2820, 2823, 2827, 2831, 2835, 2845, 2854, 2856, 2864, 2868, 2870, 2872, 2874, 2877, 2880, 2886, 2891, 2901, 2903, 2907, 2911, 2912, 2915, 2925, 2927, 2931, 2934, 2940, 2942, 2954, 2962, 2965, 2976, 2980, 2983, 2992, 2997, 3001, 3015, 3020, 3034, 3042, 3058, 3067, 3071, 3081, 3086, 3095, 3101, 3115, 3131, 3133, 3146, 3151, 3154, 3166, 3174, 3178, 3186, 3191, 3200, 3202, 3215, 3218, 3225, 3237, 3240, 3247, 3254, 3265, 3271, 3272, 3276, 3280, 3287, 3291, 3296, 3304, 3311, 3316, 3328, 3336, 3346, 3353, 3361, 3364, 3372, 3380, 3381, 3388, 3401, 3411, 3415, 3435, 3440, 3444, 3447, 3455, 3461, 3472, 3475, 3480, 3481, 3489, 3506, 3509, 3517, 3520, 3527, 3533, 3549, 3561, 3563, 3566, 3568, 3583, 3601, 3604, 3611, 3615, 3631, 3637, 3647, 3658, 3662, 3672, 3683, 3691, 3700, 3703, 3707, 3715, 3720, 3722, 3734, 3742, 3745, 3753, 3756, 3770, 3787, 3790, 3797, 3800, 3807, 3812, 3818, 3827, 3833, 3837, 3845, 3847, 3861, 3864, 3870, 3873, 3878, 3880, 3882, 3884, 3891, 3901, 3907, 3911, 3918, 3929, 3931, 3934, 3947, 3951, 3957, 3966, 3972, 3976, 3987, 3997, 4001, 4005, 4009, 4017, 4020, 4024, 4029, 4047, 4049, 4059, 4073, 4080, 4098, 4105, 4108, 4121, 4128, 4131, 4137, 4145, 4148, 4150, 4154, 4161, 4169, 4173, 4179, 4182, 4188, 4203, 4211, 4218, 4221, 4223, 4227, 4230, 4236, 4240, 4247, 4249, 4250, 4251, 4254, 4262, 4267, 4271, 4272, 4276, 4280, 4285, 4290, 4292
+
+
+**II.  Reinforcement Learning (RL):**
+
+* **Offline RL:** 142, 200, 355, 439, 464, 537, 571, 671, 681, 712, 794, 855, 905, 964, 995, 1008, 1053, 1062, 1142, 1143, 1214, 1253, 1355, 1388, 1416, 1432, 1449, 1464, 1488, 1690, 1744, 1817, 1847, 1861, 1906, 1933, 1953, 1964, 1998, 2002, 2053, 2055, 2078, 2136, 2155, 2177, 2182, 2200, 2224, 2227, 2233, 2274, 2284, 2307, 2320, 2333, 2337, 2353, 2357, 2376, 2383, 2406, 2411, 2414, 2424, 2444, 2455, 2471, 2484, 2506, 2507, 2537, 2553, 2555, 2568, 2584, 2607, 2621, 2630, 2653, 2661, 2662, 2666, 2670, 2681, 2686, 2712, 2730, 2736, 2744, 2757, 2765, 2777, 2797, 2806, 2827, 2836, 2848, 2857, 2861, 2866, 2874, 2883, 2888, 2906, 2909, 2912, 2930, 2944, 2961, 2970, 2973, 2990, 2993, 3007, 3027, 3045, 3057, 3062, 3070, 3088, 3092, 3111, 3136, 3139, 3157, 3162, 3177, 3182, 3193, 3201, 3205, 3222, 3227, 3233, 3239, 3245, 3253, 3257, 3260, 3270, 3288, 3300, 3307, 3313, 3321, 3333, 3343, 3355, 3358, 3366, 3376, 3382, 3395, 3405, 3413, 3427, 3433, 3438, 3455, 3465, 3474, 3488, 3490, 3510, 3512, 3516, 3523, 3533, 3539, 3553, 3564, 3571, 3588, 3600, 3606, 3613, 3621, 3636, 3645, 3650, 3662, 3666, 3681, 3688, 3706, 3709, 3723, 3730, 3736, 3739, 3744, 3755, 3761, 3766, 3771, 3777, 3784, 3786, 3792, 3806, 3816, 3824, 3833, 3848, 3858, 3861, 3866, 3871, 3878, 3883, 3888, 3906, 3913, 3917, 3923, 3933, 3935, 3939, 3948, 3958, 3966, 3976, 3983, 4007, 4010, 4016, 4024, 4039, 4045, 4055, 4065, 4070, 4077, 4093, 4106, 4112, 4120, 4123, 4125, 4138, 4146, 4151, 4153, 4162, 4172, 4177, 4186, 4193, 4198, 4201, 4206, 4212, 4216, 4219, 4224, 4229, 4233, 4245, 4248, 4255, 4261, 4266, 4271, 4278, 4283, 4286, 4295
+
+
+**III.  Computer Vision (CV):**
+
+* **Image Generation and Editing:** 22, 75, 115, 131, 156, 167, 211, 231, 251, 275, 303, 312, 333, 345, 356, 365, 382, 404, 473, 496, 517, 579, 591, 610, 667, 732, 757, 781, 787, 790, 803, 806, 821, 851, 862, 884, 912, 914, 932, 960, 977, 1000, 1004, 1021, 1045, 1065, 1075, 1091, 1129, 1145, 1150, 1165, 1167, 1191, 1204, 1221, 1257, 1275, 1291, 1309, 1332, 1346, 1365, 1371, 1382, 1394, 1405, 1444, 1456, 1467, 1491, 1507, 1521, 1526, 1530, 1541, 1556, 1567, 1577, 1598, 1612, 1618, 1627, 1639, 1644, 1667, 1672, 1684, 1694, 1703, 1707, 1729, 1757, 1766, 1770, 1775, 1781, 1786, 1812, 1830, 1832, 1837, 1851, 1863, 1867, 1871, 1889, 1892, 1922, 1924, 1930, 1944, 1962, 1970, 1990, 1998, 2000, 2003, 2006, 2011, 2016, 2017, 2029, 2032, 2038, 2045, 2050, 2057, 2078, 2082, 2084, 2089, 2092, 2095, 2105, 2115, 2117, 2127, 2129, 2138, 2140, 2145, 2146, 2151, 2159, 2165, 2167, 2172, 2180, 2186, 2191, 2194, 2200, 2206, 2217, 2226, 2231, 2235, 2239, 2246, 2247, 2251, 2257, 2264, 2267, 2275, 2281, 2291, 2294, 2300, 2305, 2306, 2308, 2316, 2320, 2322, 2329, 2334, 2341, 2344, 2354, 2359, 2362, 2366, 2371, 2377, 2380, 2382, 2388, 2391, 2394, 2399, 2402, 2405, 2408, 2414, 2418, 2425, 2431, 2440, 2444, 2448, 2458, 2462, 2471, 2473, 2489, 2492, 2501, 2507, 2525, 2534, 2545, 2550, 2556, 2572, 2576, 2582, 2588, 2594, 2610, 2619, 2625, 2627, 2632, 2635, 2644, 2654, 2659, 2663, 2668, 2672, 2682, 2688, 2702, 2709, 2711, 2718, 2723, 2729, 2736, 2740, 2743, 2746, 2751, 2759, 2766, 2779, 2780, 2790, 2795, 2803, 2814, 2819, 2821, 2829, 2831, 2848, 2850, 2857, 2859, 2860, 2862, 2871, 2881, 2892, 2897, 2901, 2904, 2908, 2917, 2919, 2921, 2924, 2930, 2932, 2946, 2948, 2952, 2955, 2959, 2968, 2970, 2977, 2981, 2996, 3005, 3011, 3016, 3020, 3023, 3032, 3035, 3037, 3039, 3043, 3046, 3050, 3052, 3055, 3060, 3068, 3071, 3078, 3082, 3090, 3091, 3100, 3103, 3113, 3122, 3132, 3142, 3153, 3158, 3171, 3186, 3189, 3190, 3204, 3207, 3210, 3222, 3229, 3235, 3240, 3243, 3248, 3250, 3252, 3257, 3264, 3270, 3273, 3279, 3289, 3290, 3299, 3300, 3309, 3316, 3317, 3321, 3326, 3330, 3333, 3335, 3340, 3344, 3352, 3355, 3362, 3369, 3373, 3380, 3382, 3384, 3389, 3395, 3397, 3399, 3402, 3405, 3409, 3414, 3420, 3421, 3424, 3425, 3427, 3431, 3434, 3437, 3440, 3444, 3446, 3449, 3454, 3456, 3458, 3460, 3462, 3467, 3469, 3470, 3473, 3476, 3479, 3480, 3482, 3484, 3486, 3490, 3493, 3496, 3501, 3503, 3507, 3513, 3515, 3521, 3524, 3528, 3534, 3536, 3542, 3544, 3548, 3550, 3552, 3556, 3560, 3564, 3568, 3570, 3579, 3586, 3591, 3594, 3605, 3606, 3610, 3616, 3620, 3626, 3628, 3632, 3635, 3639, 3644, 3648, 3651, 3654, 3658, 3663, 3665, 3667, 3673, 3675, 3680, 3682, 3690, 3692, 3704, 3707, 3710, 3713, 3716, 3720, 3722, 3725, 3728, 3733, 3735, 3738, 3741, 3743, 3749, 3751, 3757, 3760, 3762, 3764, 3769, 3770, 3774, 3779, 3780, 3783, 3785, 3787, 3791, 3797, 3801, 3804, 3809, 3813, 3816, 3821, 3823, 3826, 3831, 3836, 3840, 3844, 3846, 3850, 3853, 3856, 3860, 3862, 3866, 3870, 3872, 3875, 3876, 387
+
+###[sep] id: 0.1
+q: Give me the most diverse selection of papers I should read before attending the conference. Limit to top-10.
+---
+Choosing the "most diverse" set depends somewhat on your background and interests, but aiming for a spread across methodologies, application domains, and theoretical contributions is key. Here's a selection of 10 papers from the list, attempting to maximize diversity:
+
+2991: Inflationary Flows: Calibrated Bayesian Inference with Diffusion-Based Models (Novel methodology combining flows and Bayesian inference)
+
+3060: Is Score Matching Suitable for Estimating Point Processes? (Theoretical contribution challenging existing methods)
+
+2667: Latent Functional Maps: a spectral framework for representation alignment (Novel approach to representation alignment using spectral methods)
+
+1400: Nuclear Norm Regularization for Deep Learning (Application of established technique to a new domain)
+
+2863: Efficient Streaming Algorithms for Graphlet Sampling (Algorithms for efficient graph analysis)
+
+3299: Simplifying Constraint Inference with Inverse Reinforcement Learning (Reframing a problem to improve efficiency)
+
+3745: Learning Optimal Lattice Vector Quantizers for End-to-end Neural Image Compression (Focus on practical optimization for a specific application)
+
+1993: NeoRL: Efficient Exploration for Nonepisodic RL (Addressing a specific challenge in RL)
+
+2456: Cherry on Top: Parameter Heterogeneity and Quantization in Large Language Models (Focus on practical aspects of LLM implementation)
+
+1820: Conformal Alignment: Knowing When to Trust Foundation Models with Guarantees (Combines conformal prediction with foundation models)
+
+This selection covers:
+
+Different model types: Diffusion models, Bayesian methods, Graph Neural Networks, LLMs, and classical statistical techniques.
+
+Diverse methodologies: Theoretical analysis, algorithm development, and empirical evaluations.
+
+Range of applications: Image processing, Reinforcement Learning, Bayesian inference, Graph analysis, Language models, and general machine learning theory.
+
+Remember to prioritize papers that directly intersect with your research interests within this diverse sample. The abstracts provide a good starting point for selecting the most relevant ones for your background.
+###[sep] id: 0.2
+q: Give me the most diverse selection of papers I should read before attending the conference. I also want to maximize coverage, so it's important to choose papers which have most similarity to others in the data. Limit to top-10.
+---
+Picking the "most diverse" while maximizing coverage is inherently contradictory. Diversity implies selecting papers from disparate subfields, while maximizing coverage requires focusing on central or highly interconnected themes. To give you a balanced selection that attempts to address both, I will select papers representing different key areas within the conference, while prioritizing those with connections to other papers (demonstrating broader relevance). Note that true diversity and coverage maximization require more sophisticated graph analysis techniques than are possible here.
+
+This selection prioritizes methodological novelty and impact across diverse subfields, attempting a balance between diversity and coverage:
+
+255: Learning Spatially-Aware Language and Audio Embeddings: This paper bridges audio, language, and spatial understanding, a burgeoning area with significant potential for cross-pollination with other research.
+
+100: Temporally Consistent Atmospheric Turbulence Mitigation with Neural Representations: Addresses a specific problem with broad implications in computer vision and image processing. Relevant to many image/video generation and enhancement papers.
+
+450: Gorilla: Large Language Model Connected with Massive APIs: Showcases the interaction between LLMs and external tools, a rapidly expanding field.
+
+140: Towards Human-AI Complementarity with Prediction Sets: Addresses the human-computer interaction aspects of AI, a crucial concern.
+
+773: VisionLLM v2: An End-to-End Generalist Multimodal Large Language Model for Hundreds of Vision-Language Tasks: Represents the state-of-the-art in multimodal models, a highly relevant area.
+
+177: Communication-Efficient Federated Group Distributionally Robust Optimization: Focuses on federated learning, a critical area for scaling and privacy-preserving AI.
+
+83: Optimal Algorithms for Learning Partitions with Faulty Oracles: Addresses fundamental theoretical questions in machine learning.
+
+62: DiffusionPDE: Generative PDE-Solving under Partial Observation: Showcases the integration of diffusion models into scientific computing, a powerful emerging application.
+
+52: On Differentially Private U Statistics: Deals with fundamental privacy-preserving methods.
+
+1380: A scalable generative model for dynamical system reconstruction from neuroimaging data: Combines generative models and neuroscience, an increasingly important area.
+
+This selection attempts to provide a good overview of the breadth of the conference while acknowledging the interconnectedness of many of the research themes. To further optimize for diversity, you might want to use a tool that creates a similarity matrix or graph of the papers based on their abstracts or keywords and then use a community detection algorithm to identify the most representative papers from each cluster.
