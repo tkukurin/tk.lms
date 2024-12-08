@@ -11,8 +11,50 @@ fname = _nameit('.json')
 df = pd.read_json(fname)
 
 # %%
-df['topic'].value_counts()
+df['topic'] = df['topic'].astype(pd.CategoricalDtype())
+print(
+    df['topic'].value_counts()[:5],
+    df['topic'].value_counts()[-5:],
+    sep='\n\n'
+)
 
+# topic
+# machine_vision                 605
+# natural_language_processing    313
+# reinforcement_learning         288
+# learning_theory                264
+# diffusion_based_models         229
+# Name: count, dtype: int64
+# 
+# topic
+# speech_and_audio                        30
+# infrastructure                          28
+# active_learning                         25
+# human-AI_interaction                    22
+# machine_learning_for_social_sciences    21
+# Name: count, dtype: int64
+
+# %%
+df['authors'].apply(lambda x: len(x)).hist(bins=10)
+# %%
+import itertools as it
+from collections import Counter
+auth2count = Counter(it.chain(*df['authors']))
+# %%
+auth2df = (
+    df.explode('authors')
+    .apply({'authors': lambda x: x.apply(str.title)})
+    .groupby('authors')
+)
+print(f'{len(auth2df.groups)=}')
+
+auth2count = sorted(
+    [(len(v), k) for k, v in auth2df.groups.items()])
+print(
+    auth2count[:5],
+    auth2count[-5:],
+    sep='\n\n'
+)
 # %%
 def clean(xs):
     replace = lambda text: (
@@ -21,7 +63,8 @@ def clean(xs):
     )
     return xs.apply(replace)
 
-df.apply(clean, axis=1).to_excel(_nameit(".xlsx"))
+# for viewing in gsheets, need to remove some tab chars tho
+# df.apply(clean, axis=1).to_excel(_nameit(".xlsx"))
 # %%
 
 gemini_flash_answer = """
@@ -113,3 +156,6 @@ claude_sonnet_35 = """
 - Quantum speedups demonstrated for finding Goldstein stationary points[202]
 - Minimax optimal bounds established for corruption-robust linear bandits[203]
 """
+
+# %%
+# %%
