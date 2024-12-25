@@ -1,3 +1,6 @@
 [submodule "src/tk/incontext"]
 	path = src/tk/incontext
-	url = https://github.com/tkukurin/emergent_in_context_learning.git
+	url = https://github.com/tkukurin/tk.eicl.git
+[submodule "data/ARC-AGI"]
+	path = data/ARC-AGI
+	url = https://github.com/fchollet/ARC-AGI.git
