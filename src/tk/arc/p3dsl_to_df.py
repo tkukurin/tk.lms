@@ -138,6 +138,7 @@ df = pd.merge(df_fns, df_data, on='id', how='inner')
 df = df.set_index(['id', 'example_id', 'step']).sort_index()
 
 # parquet doesn't work because arguments are lists
+from tk import datadir
 df.to_pickle(datadir / 'michaelhodel_rearc_data.pkl')
 
 # %%
