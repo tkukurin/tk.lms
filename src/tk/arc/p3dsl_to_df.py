@@ -113,29 +113,7 @@ df_fns = pd.DataFrame([
 df_fns['id'] = df_fns['id'].str.removeprefix('solve_')
 
 # %%
-import json
-import os
-from tk import datadir
-
-
-def get_data(split='evaluation'):
-    path = datadir / f'ARC-AGI/data/{split}'
-    data = {}
-    for fn in os.listdir(path):
-        with open(f'{path}/{fn}') as f:
-            data[fn.rstrip('.json')] = json.load(f)
-    ast = lambda g: tuple(tuple(r) for r in g)
-    return {
-        'train': {k: [{
-            'input': ast(e['input']),
-            'output': ast(e['output']),
-        } for e in v['train']] for k, v in data.items()},
-        'test': {k: [{
-            'input': ast(e['input']),
-            'output': ast(e['output']),
-        } for e in v['test']] for k, v in data.items()}
-    }
-
+from tk.arc.p3 import get_data
 data = get_data('training')
 print(len(data['train']))
 print(len(data['test']))
@@ -156,12 +134,12 @@ df_data = df_data.pivot(
     columns='column', 
     values='value').reset_index()
 
-df_combined = pd.merge(df_fns, df_data, on='id', how='inner')
-df_combined = df_combined.set_index(['id', 'example_id', 'step']).sort_index()
+df = pd.merge(df_fns, df_data, on='id', how='inner')
+df = df.set_index(['id', 'example_id', 'step']).sort_index()
 
 # parquet doesn't work because arguments are lists
-df_combined.to_pickle(datadir / 'michaelhodel_rearc_data.pkl')
+df.to_pickle(datadir / 'michaelhodel_rearc_data.pkl')
 
 # %%
-print(df_combined[:2].to_markdown())
+print(df[:2].to_markdown())
 # %%

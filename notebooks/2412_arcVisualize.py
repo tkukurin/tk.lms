@@ -54,32 +54,29 @@ def visualize_grid(grid) -> plt.Figure:
     return fig
 
 # %%
-import json
-import os
-from tk import datadir
-
-
-def get_data(split='evaluation'):
-    path = datadir / f'ARC-AGI/data/{split}'
-    data = {}
-    for fn in os.listdir(path):
-        with open(f'{path}/{fn}') as f:
-            data[fn.rstrip('.json')] = json.load(f)
-    ast = lambda g: tuple(tuple(r) for r in g)
-    return {
-        'train': {k: [{
-            'input': ast(e['input']),
-            'output': ast(e['output']),
-        } for e in v['train']] for k, v in data.items()},
-        'test': {k: [{
-            'input': ast(e['input']),
-            'output': ast(e['output']),
-        } for e in v['test']] for k, v in data.items()}
-    }
-
+from tk.arc.p3 import get_data
 data = get_data('evaluation')
 # %%
 with plt.ioff():
     fig = visualize_grid(data['test']['da515329'][0]['input'])
 fig
+# %%
+from tk.arc import converters
+from tk import datadir
+df, df_io, df_grouped, vocab = converters.split_stored_df(
+    datadir / 'michaelhodel_rearc_data.pkl')
+# %%
+encoder = converters.SimpleArcGridSeqEncoder(
+    vocab, df_io=df_io, df_grouped=df_grouped)
+# %%
+encoded, skipped, hist = encoder.encode_all_with_padding(
+    quantile=0.75)
+# %%
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots()
+ax.hist(hist.keys(), bins=20)
+ax.set_title("Encoded problem length in tokens")
+# add veritcal line at quantile
+ax.axvline(0.75 * max(hist.keys()), color='r')
+plt.show()
 # %%
