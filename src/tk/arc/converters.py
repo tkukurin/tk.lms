@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import numpy as np
+from loguru import logger
 
 from typing import Callable
 
@@ -76,21 +77,31 @@ class SimpleArcGridSeqEncoder:
         program = row_to_tokens(row)
         return inputs, outputs, program
 
-    def encode_problem(self, id: str, max_length: int = 99999) -> list:
+    def encode_problem(self, id: str, max_length: int = 99999) -> tuple:
         """Encode a problem into a list of tokens"""
-        inputs, outputs, program = self._encode_problem(id)
-        inputs = [self.tok2id[i] for inp in inputs for i in inp]
-        outputs = [self.tok2id[i] for inp in outputs for i in inp]
+        inputs_all, outputs_all, program = self._encode_problem(id)
+        inputs = [[self.tok2id[i] for i in inp] for inp in inputs_all]
+        outputs = [[self.tok2id[i] for i in out] for out in outputs_all]
         program = [self.tok2id[i] for i in program]
         assert len(program) <= max_length, f"Invalid example {id}"
-        tokens = inputs + outputs + program
-        i = len(tokens) - 1
+        assert len(inputs) == len(outputs), f"Invalid example {id}, {len(inputs)} != {len(outputs)}"
+        flat = lambda xss: [x for xs in xss for x in xs]
+        tokens = flat(inputs) + flat(outputs) + program
+        i = len(inputs) - 1
+        skipped = {'in': [], 'out': []}
         while len(tokens) > max_length:
-            tokens = inputs[:i] + outputs[:i] + program
+            skipped['in'].append(inputs[i])
+            skipped['out'].append(outputs[i])
+            inputs, outputs = inputs[:i], outputs[:i]
+            tokens = flat(inputs) + flat(outputs) + program
             i -= 1
         if i == -1:
-            raise ValueError(f"Problem {id} is too long")
-        return tokens
+            logger.warning(
+                f"Problem {id} is too long for {max_length}"
+                f" ({len(program)} program toks, {len(inputs_all)} examples)"
+            )
+            return None, skipped
+        return tokens, skipped
 
     def encode_all_with_padding(
         self, max_length: int = 99999, quantile: float = 0.75) -> tuple:
@@ -103,9 +114,12 @@ class SimpleArcGridSeqEncoder:
         """
         length_hist = {}
         encoded = {}
+        truncated = {}
         for multiix, row in self.df_io.iterrows():
-            i, *_ = multiix
-            tokens = self.encode_problem(i, max_length)
+            i, *_ = multiix  # type: ignore (not sure why complaining)
+            tokens, skipped = self.encode_problem(i, max_length)
+            if not tokens: continue
+            if skipped: truncated[i] = skipped
             length_hist[len(tokens)] = length_hist.get(len(tokens), 0) + 1
             encoded[i] = tokens
         skipped = {}
@@ -119,7 +133,11 @@ class SimpleArcGridSeqEncoder:
             k: tokens + [self.tok2id['<pad>']] * (max_length - len(tokens)) 
             for k, tokens in encoded.items()
         }
-        return encoded_padded, skipped, length_hist
+        meta = dict(
+            skipped_full=skipped, 
+            truncated=truncated, 
+            hist=length_hist)
+        return encoded_padded, meta
 
 
 def row_to_string(row: pd.Series):
