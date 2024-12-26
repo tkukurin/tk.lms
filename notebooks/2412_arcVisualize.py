@@ -78,5 +78,12 @@ ax.hist(hist.keys(), bins=20)
 ax.set_title("Encoded problem length in tokens")
 # add veritcal line at quantile
 ax.axvline(0.75 * max(hist.keys()), color='r')
+# ax.text(0.75 * max(hist.keys()), 20, '75%', rotation=90, va='bottom')
+ax.text(0.875 * max(hist.keys()), 85, 'Skipped', color='r', ha='center', bbox=dict(facecolor='white', alpha=0.5, edgecolor='white'))
+ax.fill_betweenx(
+    [0, 100], 0.75 * max(hist.keys()), max(hist.keys()), color='r', alpha=0.1)
+ax.set_xlim(0, max(hist.keys()))
+ax.set_ylim(0, 100)
 plt.show()
+
 # %%
