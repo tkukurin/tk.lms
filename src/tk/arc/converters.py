@@ -159,10 +159,10 @@ def row_to_tokens(row, splitx = True):
             import re
             # if x.startswith('x'):  # x1
             if re.match(r'(x\d+|\d+)', x):
-                return x
+                return list(x)
             return [x]  # [function]
     for var, func, args in zip(row['variable'], row['function'], row['arguments']):
-        args = it.chain(*(splitter(str(arg)) for arg in args))
+        args = it.chain(*(splitter(str(arg)) + [','] for arg in args))
         tokens.extend(map(str, (*splitter(var), '=', func, '(', *args, ')')))
     return tokens
 
