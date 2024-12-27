@@ -14,7 +14,7 @@ dependencies = [
     "datasets",
     "diskcache",
     "rich",
-    "jax",
+    "jax[cuda]",
     # todo cuda?
     "ipykernel",
     "networkx",
@@ -48,6 +48,9 @@ dependencies = [
     "rapidfuzz",
     "tiktoken>=0.8.0",
     "dm-pix>=0.4.3",
+    "wandb>=0.19.1",
+    "ml-collections>=1.0.0",
+    "wrapt>=1.17.0",
 ]
 
 [project.optional-dependencies]
