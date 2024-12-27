@@ -1,5 +1,6 @@
 """Various conversion conveniences.
 """
+from collections import Counter
 import itertools as it
 from pathlib import Path
 
@@ -7,7 +8,7 @@ import pandas as pd
 import numpy as np
 from loguru import logger
 
-from typing import Callable
+from typing import Callable, Literal
 
 def split_stored_df(df: pd.DataFrame | str | Path) -> tuple[
     pd.DataFrame, pd.DataFrame, pd.DataFrame, dict
@@ -37,10 +38,10 @@ def split_stored_df(df: pd.DataFrame | str | Path) -> tuple[
         name: call for name, call in inspect.getmembers(dsl, inspect.isfunction)
     }
 
-    vocab = (
+    vocab = set(
         set(df['function'].unique())
-        | set(x for x in df['variable'].unique() if not str(x).startswith('x'))
-        | set(x for x in sum(df['arguments'], []) if not str(x).startswith('x'))
+        | set(str(x) for x in df['variable'].unique() if not str(x).startswith('x'))
+        | set(str(x) for x in sum(df['arguments'], []) if not str(x).startswith('x'))
         | set(primitive2fn.keys())
         | {'I', 'O', 'x', '(', ')', ';', '=', ',', ' ', }
         | set('1234567890')
@@ -66,6 +67,9 @@ class SimpleArcGridSeqEncoder:
         self.df_io = df_io
         self.df_grouped = df_grouped
         self.tok2id = tok2id
+        assert len(set(tok2id.values())) == len(tok2id), (
+            f"Duplicate values in vocab: {[(k, v) for k, v in Counter(tok2id.values()).most_common() if v > 1]}"
+        )
 
     def _encode_problem(self, id: str) -> tuple:
         problems = self.df_io.loc[id].reset_index()
@@ -138,6 +142,46 @@ class SimpleArcGridSeqEncoder:
             truncated=truncated, 
             hist=length_hist)
         return encoded_padded, meta
+
+    @classmethod
+    def outdir(cls):
+        from tk import datadir
+        return datadir / 'mhodel_rearc'
+    
+    def save(self, encoded: dict):
+        """save encoded data to a consistent path.
+        """
+        import pandas as pd
+        outdir = self.outdir()
+        outdir.mkdir(exist_ok=True, parents=True)
+        pd.DataFrame(encoded).T.to_parquet(
+            outdir / 'paddedFilteredTrain.parquet')
+        pd.DataFrame(
+            list(self.tok2id.items()), 
+            columns=['token', 'id'], 
+            dtype=('str', 'int')
+        ).to_parquet(outdir / 'vocab.parquet')
+        return outdir
+
+    @classmethod
+    def load(cls, fmt: Literal['hfd', 'raw'] = 'raw'):
+        outdir = cls.outdir()
+        df = pd.read_parquet(outdir / 'paddedFilteredTrain.parquet')
+        vocab = pd.read_parquet(outdir / 'vocab.parquet')
+        vocab['id'] = vocab['id'].astype(int)
+        vdict = vocab.to_dict('list')
+        vocab = dict(zip(vdict['token'], vdict['id']))
+        if fmt in ('hfd', 'huggingface', 'hf'):
+            from datasets import Dataset
+            dataset = Dataset.from_dict({
+                'input_ids': df.values,
+                'attention_mask': df.values != vocab['<pad>'],
+            })
+            dataset.set_format(type='jax', columns=['input_ids', 'attention_mask'])
+            return dataset, vocab
+        elif fmt in ('raw', ):
+            return df, vocab
+        raise ValueError(f"Unknown format {fmt}")
 
 
 def row_to_string(row: pd.Series):
