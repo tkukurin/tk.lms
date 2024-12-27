@@ -1,4 +1,4 @@
-"""Check ARC tokenizer stats and info.
+"""Check ARC tokenizer stats and info, then dump filtered data to parquet for training.
 """
 
 # %%
@@ -40,10 +40,14 @@ ax.hist([k for k in hist if k < quantile * max(hist.keys())], bins=20)
 ax.set_title("Encoded problem length in tokens (non-skipped)")
 plt.show()
 # %%
-encoded.keys()
-# %%
 i2t = {v: k for k, v in encoder.tok2id.items()}
 pad = encoder.tok2id['<pad>']
 [i2t[k] for k in encoded['007bbfb7'] if k != pad]
 
+# %%
+print('Saved:', encoder.save(encoded))
+# from tk import datadir
+# import pandas as pd
+# pd.DataFrame(encoded).T.to_parquet(
+#     datadir / 'michaelhodel_rearc_paddedFilteredTrain.parquet')
 # %%
