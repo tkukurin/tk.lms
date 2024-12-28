@@ -3,6 +3,7 @@
 from typing import cast
 import jax
 
+from tk.arc.expt.__main__ import _save_state_from_in_memory_checkpointer
 from tk.models.gpt2 import GPT, GPTConfig
 from tk.jaxline import experiment
 from tk.jaxline import utils
@@ -103,7 +104,7 @@ class Experiment(experiment.AbstractExperiment):
             self.state.params)
         self.state = self.state.apply_gradients(grads=grads)
 
-        metrics = dict(loss=loss.item())
+        metrics = dict(loss_train=loss.item())
         writer.write_scalars(global_step, metrics)
         return metrics
     
@@ -127,8 +128,17 @@ class Experiment(experiment.AbstractExperiment):
             loss = loss.sum() / padding_mask.sum()
         else:
             loss = loss.mean()
-        return dict(loss=loss.item())
+        metrics = dict(loss_eval=loss.item())
+        writer.write_scalars(global_step, metrics)
+        return metrics
 
-    def on_new_best_model(self, best_state):
+    def on_new_best_model(self, best_state: config_dict.ConfigDict):
         print("Best model!")
         print(f"{best_state=}")
+        # e.g. keys:
+        # ['best_eval_metric_value', 'best_model_eval_metric',
+        # 'experiment_module', 'global_step', 'train_step_rng']
+        # TODO this would work but there's got to be a beter way
+        # in memory checkpointer to non in mem ckptr
+        # _save_state_from_in_memory_checkpointer(
+            # self.cfg.checkpoint_dir, self)

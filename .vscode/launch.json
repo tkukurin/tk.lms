@@ -5,16 +5,70 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "[EICL] train",
+            "name": "run current",
             "type": "debugpy",
             "request": "launch",
-            "module": "tk.eicl.experiment.experiment",
+            "program": "${file}",
+            "console": "integratedTerminal",
+        },
+        {
+            "name": "[jaxline/dbg] train",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tk.arc.expt",
             "args": [
-                "--config", "src/tk/eicl/experiment/configs/images_all_exemplars.py",
+                "--config", "src/tk/arc/expt/cfg/autoregressive.py",
                 "--logtostderr",
-                "--jaxline_mode", "train"
+                "--jaxline_mode", 
+                "train_eval_multithreaded",
+                // if restoring
+                // "--config.restore_path=./data/outputs/arc-ckpt/models/latest/latest.dill"
             ],
-            "env": {"JAX_DISABLE_JIT": "1"}
+            "env": {  // debug settings
+                "JAX_DISABLE_JIT": "1",
+                // "XLA_PYTHON_CLIENT_MEM_FRACTION": 0.2,  // apparently also a thing
+            },
+            // I asked GPT what to add
+            "cwd": "${workspaceFolder}", // Set working directory
+            "justMyCode": false, // Allow debugging into third-party libraries
+            "stopOnEntry": false, // Don't stop at the start of the program
+            "subProcess": true, // Debug subprocesses (important for DDP or multithreading)
+            "redirectOutput": true, // Capture stdout/stderr in the Debug Console
+        },
+        {
+            "name": "[jaxline] train",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tk.arc.expt",
+            "args": [
+                "--config", "src/tk/arc/expt/cfg/autoregressive.py",
+                "--logtostderr",
+                "--jaxline_mode", 
+                "train_eval_multithreaded",
+                // if restoring
+                // "--config.restore_path=./data/outputs/arc-ckpt/models/latest/latest.dill"
+            ],
+            "env": {
+                "JAX_DISABLE_JIT": "0",
+            },
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+            "stopOnEntry": false, 
+            "subProcess": true, 
+            "redirectOutput": true,
+        },
+        {
+            "name": "jaxnojit current",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            // "args": [
+            //     "${command:pickArgs}"
+            // ],
+            "env": {
+                "JAX_DISABLE_JIT": "1"
+            }
         },
         {
             "name": "Python Debugger: Current File with Arguments",

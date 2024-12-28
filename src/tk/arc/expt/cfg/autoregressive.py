@@ -29,8 +29,13 @@ def get_config(debug: str = '0'):
         ),
     )
 
-    cfg.best_model_eval_metric = 'loss'
+    cfg.eval_initial_weights = True
+    cfg.max_checkpoints_to_keep = 2
+
+    # NB, needs to be present in scalar_values as you return from evaluate()
+    cfg.best_model_eval_metric = 'loss_eval'
     cfg.best_model_eval_metric_higher_is_better = False
+
     cfg.training_steps = m(int(5e5), 16)
     cfg.log_train_data_interval = m(60, 1)
     cfg.log_tensors_interval = m(60, 1)

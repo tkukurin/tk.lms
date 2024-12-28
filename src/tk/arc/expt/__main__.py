@@ -51,8 +51,13 @@ def _save_state_from_in_memory_checkpointer(
     os.makedirs(save_dir, exist_ok=True)
     with open(python_state_path, 'wb') as f:
       dill.dump(state_dict, f)
+    # make it easy to just continue "last" run
+    save_path_no_label = os.path.join(save_path, checkpoint_name, 'latest.dill')
+    with open(save_path_no_label, 'wb') as f:
+      dill.dump(state_dict, f)
     logging.info(
-        'Saved "%s" checkpoint to %s', checkpoint_name, python_state_path)
+        'Saved "%s" checkpoint to:\n%s\nand\n%s',
+        checkpoint_name, python_state_path, save_path_no_label)
     return os.path.abspath(save_dir)
 
 
