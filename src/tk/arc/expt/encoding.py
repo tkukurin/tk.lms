@@ -39,7 +39,7 @@ def split_stored_df(df: pd.DataFrame | str | Path) -> tuple[
     }
 
     vocab = set(
-        set(df['function'].unique())
+        set(x for x in df['function'].unique() if not str(x).startswith('x'))
         | set(str(x) for x in df['variable'].unique() if not str(x).startswith('x'))
         | set(str(x) for x in sum(df['arguments'], []) if not str(x).startswith('x'))
         | set(primitive2fn.keys())
@@ -211,7 +211,7 @@ def row_to_tokens(row, splitx = True):
             return [x]  # [function]
     for var, func, args in zip(row['variable'], row['function'], row['arguments']):
         args = it.chain(*(splitter(str(arg)) + [','] for arg in args))
-        tokens.extend(map(str, (*splitter(var), '=', func, '(', *args, ')')))
+        tokens.extend(map(str, (*splitter(var), '=', *splitter(func), '(', *args, ')')))
     return tokens
 
 
