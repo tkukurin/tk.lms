@@ -2,12 +2,12 @@
 """
 
 # %%
-from tk.arc import converters
+from tk.arc.expt import encoding
 from tk import datadir
-df, df_io, df_grouped, vocab = converters.split_stored_df(
+df, df_io, df_grouped, vocab = encoding.split_stored_df(
     datadir / 'michaelhodel_rearc_data.pkl')
 # %%
-encoder = converters.SimpleArcGridSeqEncoder(
+encoder = encoding.SimpleArcGridSeqEncoder(
     vocab, df_io=df_io, df_grouped=df_grouped)
 # %%
 quantile = 0.75
@@ -43,7 +43,6 @@ plt.show()
 i2t = {v: k for k, v in encoder.tok2id.items()}
 pad = encoder.tok2id['<pad>']
 [i2t[k] for k in encoded['007bbfb7'] if k != pad]
-
 # %%
 print('Saved:', encoder.save(encoded))
 # from tk import datadir
