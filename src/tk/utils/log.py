@@ -2,7 +2,13 @@
 """
 from pathlib import Path
 from typing import Callable
-from loguru import logger
+
+import logging
+L = logging.getLogger(__name__)
+try: from loguru import logger as L
+except: L.warning("Loguru not found")
+# TODO rich
+# from rich import logging
 
 
 def get_logger_write_method(output_dir: Path) -> Callable:
@@ -29,7 +35,7 @@ def get_logger_write_method(output_dir: Path) -> Callable:
         # https://aimstack.readthedocs.io/en/latest/using/artifacts.html
         # run.set_artifacts_uri("s3://aim/artifacts/")
     except ImportError as ie:
-        logger.warning(
+        L.warning(
             f"Unable to display metrics through aim because some package are not installed: {ie}"
         )
 
@@ -40,12 +46,12 @@ def get_logger_write_method(output_dir: Path) -> Callable:
             # from flax.metrics.tensorboard import SummaryWriter
             run = SummaryWriter(log_dir=Path(output_dir))
         except ImportError as ie:
-            logger.warning(
+            L.warning(
                 f"Unable to display metrics through TensorBoard because some package are not installed: {ie}"
             )
-            return (lambda *a, **kw: logger.info(f"{a=} {kw=}"))
+            return (lambda *a, **kw: L.info(f"{a=} {kw=}"))
 
-    logger.info(f'{run=}')
+    L.info(f'{run=}')
     return _get_track_method(run)
 
 

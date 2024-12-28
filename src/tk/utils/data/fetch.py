@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 from typing import NamedTuple
 from tk.utils.utils import fetch, datadir
-from loguru import logger
+from tk.utils.log import L
 
 
 class Xy(NamedTuple):
@@ -41,9 +41,9 @@ def mnist(mnist_dir: str | Path = mnist_default_dir) -> tuple[dict, dict]:
     for loc in mnist_locs:
         name = loc[loc.rfind('/') + 1:]
         if  (fout := mnist_dir / name).exists():
-            logger.debug(f"Skipping {fout}")
+            L.debug(f"Skipping {fout}")
             continue
-        logger.info(f'Downloading: {loc}\n -> {mnist_dir}')
+        L.info(f'Downloading: {loc}\n -> {mnist_dir}')
         with open(fout, 'wb') as f:
             if data := fetch(loc):
                 f.write(data)

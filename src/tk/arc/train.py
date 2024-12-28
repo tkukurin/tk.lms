@@ -4,7 +4,7 @@ from transformers import (
 )
 
 from tk.models.gpt2 import GPT, GPTConfig
-from tk.arc.converters import SimpleArcGridSeqEncoder
+from tk.arc.expt.encoding import SimpleArcGridSeqEncoder
 
 
 dataset, vocab = SimpleArcGridSeqEncoder.load(fmt='huggingface')
