@@ -14,6 +14,7 @@
 # ==============================================================================
 """A Deepmind-specific platform for running Experiments with Jaxline."""
 
+from collections import defaultdict
 from concurrent import futures
 import os
 from typing import Any, Mapping
@@ -37,7 +38,12 @@ except:
   logging.warning(
     "TensorFlow not installed. "
     "TensorBoard logging will not work.")
-
+try:
+  import wandb
+except:
+  logging.warning(
+    "Wandb not installed. "
+    "Wandb logging will not work.")
 
 # TODO(tomhennigan) Add support for ipdb and pudb.
 _CONFIG = config_flags.DEFINE_config_file(
@@ -82,7 +88,7 @@ class TensorBoardLogger:
 
   def write_scalars(self, global_step: int, scalars: Mapping[str, Any]):
     """Writes scalars to stdout."""
-    global_step = int(global_step)
+    global_step = int(global_step) if global_step else None
     with self._writer.as_default():
       for k, v in scalars.items():
         tf.summary.scalar(k, v, step=global_step)
@@ -90,7 +96,7 @@ class TensorBoardLogger:
 
   def write_images(self, global_step: int, images: Mapping[str, np.ndarray]):
     """Writes images to writers that support it."""
-    global_step = int(global_step)
+    global_step = int(global_step) if global_step else None
     with self._writer.as_default():
       for k, v in images.items():
         # Tensorboard only accepts [B, H, W, C] but we support [H, W] also.
@@ -103,21 +109,29 @@ class TensorBoardLogger:
 class WandbLogger:
 
   def __init__(self, config: config_dict.ConfigDict, mode: str):
-    import wandb
     log_dir = os.path.join(config.checkpoint_dir, mode)
     wandb.init(
       project=config.get('expt_name'),
       dir=log_dir)
     self._wandb = wandb
+    self.table_artefacts = defaultdict(list)
 
   def write_scalars(self, global_step: int, scalars: Mapping[str, Any]):
-    global_step = int(global_step)
+    global_step = int(global_step) if global_step else None
     self._wandb.log(scalars, step=global_step)
 
   def write_images(self, global_step: int, images: Mapping[str, np.ndarray]):
-    global_step = int(global_step)
+    global_step = int(global_step) if global_step else None
     for k, v in images.items():
       self._wandb.log({k: [self._wandb.Image(v)]}, step=global_step)
+
+  def add_table(self, table_name: str, **kwargs):
+    self.table_artefacts[table_name].append(tuple(kwargs.values()))
+    self._wandb.log({
+        table_name: wandb.Table(
+            columns=list(kwargs.keys()),
+            data=self.table_artefacts[table_name])
+    })
 
 
 def create_writer(config: config_dict.ConfigDict, mode: str) -> Any:
