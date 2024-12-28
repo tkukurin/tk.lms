@@ -1,10 +1,20 @@
-"""Implementation of a default jaxline experiment over the ARC dataset.
+"""Default jaxline experiment.
+
+Run:
+    python -m tk.arc.expt.run \
+        --config=path/to/baseline.py \
+        --mode=train_eval_multithread
 """
+import tk
+import os
+import signal
+from tk.jaxline import base_config
+from tk.models.gpt2 import GPTConfig
+
 from typing import cast
 import jax
 from tqdm import trange
 
-from tk.arc.expt.__main__ import _save_state_from_in_memory_checkpointer
 from tk.models.gpt2 import GPT, GPTConfig
 from tk.jaxline import experiment
 from tk.jaxline import utils
@@ -18,6 +28,52 @@ import numpy as np
 
 from ml_collections import config_dict
 from flax import linen as nn
+
+
+def get_config(debug: str = '0'):
+    # NB, I think with ml_collections param has to be a string
+    truthy = ('1', 'T', 'True')
+    assert debug in truthy + ('0', 'F', 'False')
+
+    def m(default_value, debug_value):
+        """Convenience for debug runs."""
+        return debug_value if (debug in truthy) else default_value
+
+    cfg = base_config.get_base_config()
+    cfg.project_name = "ARC-AGI"
+    cfg.experiment_class = Experiment
+    cfg.experiment_kwargs = dict(
+        lr=1e-4,
+        batch_size=4,
+        model_config=GPTConfig(
+            vocab_size=-1,
+            block_size=2048,
+            num_heads=8,
+            num_layers=6,
+            num_embeds=256,
+            use_bias=True,
+            dtype='float32',
+        ),
+    )
+
+    cfg.eval_initial_weights = True
+    cfg.max_checkpoints_to_keep = 2
+
+    # NB, needs to be present in scalar_values as you return from evaluate()
+    cfg.best_model_eval_metric = 'eval/loss'
+    cfg.best_model_eval_metric_higher_is_better = False
+
+    cfg.training_steps = m(int(5e5), 16)
+    cfg.log_train_data_interval = m(60, 1)
+    cfg.log_tensors_interval = m(60, 1)
+    cfg.save_checkpoint_interval = m(300, 1)
+    cfg.train_checkpoint_all_hosts = False
+    cfg.checkpoint_dir = tk.datadir / 'outputs' / 'arc-ckpt'
+    # can set as --config.restore_path during startup 
+    # NB, needs to be string not e.g. None
+    cfg.restore_path = '' #tk.datadir / 'outputs' / 'arc-ckpt' / 'models' / 'latest' / 'step...'
+
+    return cfg
 
 
 def create_train_state(rng, model, learning_rate, maxseq=2048):
@@ -158,7 +214,7 @@ class Experiment(experiment.AbstractExperiment):
             self.state.params)
         self.state = self.state.apply_gradients(grads=grads)
 
-        metrics = dict(loss_train=loss.item())
+        metrics = {'train/loss': loss.item()}
         writer.write_scalars(global_step, metrics)
         return metrics
     
@@ -183,7 +239,7 @@ class Experiment(experiment.AbstractExperiment):
             loss = loss.sum() / padding_mask.sum()
         else:
             loss = loss.mean()
-        metrics = dict(loss_eval=loss.item())
+        metrics = {'eval/loss': loss.item()}
         # since eval is multithread, can cause out of sync w train global step 
         # then wandb just disregards the metric. https://wandb.me/define-metric
         writer.write_scalars(None, metrics)
@@ -207,7 +263,7 @@ class Experiment(experiment.AbstractExperiment):
             jax.device_get(prompt), 
             jax.device_get(model_sample)):
             writer.add_table(
-                "Eval Samples",
+                "eval/samples",
                 id=f"Eval_step{global_step}",
                 prompt=[self.id2tok[i] for i in in_],
                 output=[self.id2tok[i] for i in out_[len(in_):]],
@@ -216,12 +272,9 @@ class Experiment(experiment.AbstractExperiment):
         return metrics
 
     def on_new_best_model(self, best_state: config_dict.ConfigDict):
-        print("Best model!")
-        print(f"{best_state=}")
-        # e.g. keys:
-        # ['best_eval_metric_value', 'best_model_eval_metric',
-        # 'experiment_module', 'global_step', 'train_step_rng']
-        # TODO this would work but there's got to be a beter way
-        # in memory checkpointer to non in mem ckptr
-        # _save_state_from_in_memory_checkpointer(
-            # self.cfg.checkpoint_dir, self)
+        del best_state  # unused, just for interface compatibility
+        # HACK: we save to disk on SIGINT. we also have to wait a few
+        # seconds because checkpointer.save gets called after this.
+        import threading
+        threading.Timer(
+            10.0, lambda: os.kill(os.getpid(), signal.SIGINT)).start()

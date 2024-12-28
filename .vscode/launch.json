@@ -15,9 +15,9 @@
             "name": "[jaxline/dbg] train",
             "type": "debugpy",
             "request": "launch",
-            "module": "tk.arc.expt",
+            "module": "tk.arc.expt.run",
             "args": [
-                "--config", "src/tk/arc/expt/cfg/autoregressive.py",
+                "--config", "src/tk/arc/expt/cfg/baseline.py",
                 "--logtostderr",
                 "--jaxline_mode", 
                 "train_eval_multithreaded",
@@ -39,9 +39,9 @@
             "name": "[jaxline] train",
             "type": "debugpy",
             "request": "launch",
-            "module": "tk.arc.expt",
+            "module": "tk.arc.expt.run",
             "args": [
-                "--config", "src/tk/arc/expt/cfg/autoregressive.py",
+                "--config", "src/tk/arc/expt/cfg/baseline.py",
                 "--logtostderr",
                 "--jaxline_mode", 
                 "train_eval_multithreaded",
