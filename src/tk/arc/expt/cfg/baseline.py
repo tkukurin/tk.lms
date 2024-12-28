@@ -18,7 +18,7 @@ from tqdm import trange
 from tk.models.gpt2 import GPT, GPTConfig
 from tk.jaxline import experiment
 from tk.jaxline import utils
-from tk.arc.converters import SimpleArcGridSeqEncoder
+from tk.arc.expt.encoding import SimpleArcGridSeqEncoder
 from flax.training import train_state as tslib
 import jax.numpy as jnp
 import optax
