@@ -49,6 +49,10 @@ def split_stored_df(df: pd.DataFrame | str | Path) -> tuple[
         | {'<pad>', '<sep>'}
     )
     vocab = {v: k for k, v in enumerate(vocab)}
+    assert all(isinstance(str(x), str) for x in vocab.keys()), (
+        "Non-string keys: "
+        f"{[(k, type(k)) for k in vocab if not isinstance(k, str)]}"
+    )
 
     return df, df_io, df_grouped, vocab
 
