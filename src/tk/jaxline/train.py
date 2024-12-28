@@ -41,29 +41,6 @@ def _log_outputs(step, scalar_values):
                jax.tree_util.tree_map(f_list, scalar_values))
 
 
-def _initialize_experiment(experiment_class, mode, rng, experiment_kwargs):
-  """Initializes experiment catching old style init methods."""
-  init_args = inspect.signature(experiment_class).parameters
-  if "init_rng" in init_args:
-    experiment = experiment_class(
-        mode, init_rng=rng, **experiment_kwargs)
-  else:
-    # TODO(b/205109371): Make init_rng non-optional.
-    logging.warning(
-        "You should add init_rng to your Experiment"
-        " constructor, which we will use to pass you"
-        " jaxline.base_config.random_seed. Please deprecate any use of"
-        " experiment_kwargs.config.random_seed: model initialization should"
-        " be performed with init_rng and any sweeps directly with"
-        " jaxline.base_config.random_seed. The use of"
-        " experiment_kwargs.config.random_seed was flawed design introduced"
-        " by some of our JAXline examples and meant that the rng used for"
-        " initialization (and sweeps) was decoupled from that used by the"
-        " step function. This will soon become unsupported behaviour.")
-    experiment = experiment_class(mode, **experiment_kwargs)
-  return experiment
-
-
 @utils.disable_pmap_jit
 def train(
     experiment_class,
@@ -78,16 +55,11 @@ def train(
   is_checkpointer = config.train_checkpoint_all_hosts or is_chief
 
   rng = jax.random.PRNGKey(config.random_seed)
-
-  if config.legacy_random_seed_behavior:
-    train_step_rng = rng
-    init_rng = rng
-  else:
-    train_step_rng, init_rng = jax.random.split(rng)
+  train_step_rng, init_rng = jax.random.split(rng)
 
   with utils.log_activity("experiment init"):
-    experiment = _initialize_experiment(
-        experiment_class, "train", init_rng, config.experiment_kwargs)
+    experiment = experiment_class(
+        "train", init_rng=rng, **config.experiment_kwargs)
 
   state = checkpointer.get_experiment_state("latest")
   state.global_step = 0
@@ -173,8 +145,8 @@ def evaluate(
 
   global_step = 0
   eval_rng = jax.random.PRNGKey(config.random_seed)
-  experiment = _initialize_experiment(
-      experiment_class, jaxline_mode, eval_rng, config.experiment_kwargs)
+  experiment = experiment_class(
+        jaxline_mode, init_rng=eval_rng, **config.experiment_kwargs)
 
   should_save_best_checkpoint = config.best_model_eval_metric and (
       config.best_checkpoint_all_hosts or jax.process_index() == 0)
