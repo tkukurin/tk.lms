@@ -111,7 +111,7 @@ class WandbLogger:
   def __init__(self, config: config_dict.ConfigDict, mode: str):
     log_dir = os.path.join(config.checkpoint_dir, mode)
     wandb.init(
-      project=config.get('expt_name'),
+      project=config.get("project_name"),
       dir=log_dir)
     self._wandb = wandb
     self.table_artefacts = defaultdict(list)

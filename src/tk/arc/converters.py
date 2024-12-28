@@ -174,17 +174,17 @@ class SimpleArcGridSeqEncoder:
         vocab = pd.read_parquet(outdir / 'vocab.parquet')
         vocab['id'] = vocab['id'].astype(int)
         vdict = vocab.to_dict('list')
-        vocab = dict(zip(vdict['token'], vdict['id']))
+        tok2id = dict(zip(vdict['token'], vdict['id']))
         if fmt in ('hfd', 'huggingface', 'hf'):
             from datasets import Dataset
             dataset = Dataset.from_dict({
                 'input_ids': df.values,
-                'attention_mask': df.values != vocab['<pad>'],
+                'attention_mask': df.values != tok2id['<pad>'],
             })
             dataset.set_format(type='jax', columns=['input_ids', 'attention_mask'])
-            return dataset, vocab
+            return dataset, tok2id
         elif fmt in ('raw', ):
-            return df, vocab
+            return df, tok2id
         raise ValueError(f"Unknown format {fmt}")
 
 
