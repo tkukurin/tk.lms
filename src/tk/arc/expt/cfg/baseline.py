@@ -8,6 +8,8 @@ Run:
 import tk
 import os
 import signal
+import logging
+
 from tk.jaxline import base_config
 from tk.models.gpt2 import GPTConfig
 
@@ -264,11 +266,15 @@ class Experiment(experiment.AbstractExperiment):
         for in_, out_ in zip(
             jax.device_get(prompt), 
             jax.device_get(model_sample)):
+            inout_str = [self.id2tok[i] for i in out_]
+            in_str = inout_str[:len(in_)]
+            out_str = inout_str[len(in_):]
+            logging.info(f"SAMPLE STEP\nPrompt: {in_str}\nOutput: {out_str}")
             writer.add_table(
                 "eval/samples",
                 id=f"Eval_step{global_step}",
-                prompt=[self.id2tok[i] for i in in_],
-                output=[self.id2tok[i] for i in out_[len(in_):]],
+                prompt=in_str,
+                output=out_str,
             )
 
         return metrics
