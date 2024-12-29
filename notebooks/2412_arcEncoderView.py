@@ -10,6 +10,11 @@ df, df_io, df_grouped, vocab = encoding.split_stored_df(
 encoder = encoding.SimpleArcGridSeqEncoder(
     vocab, df_io=df_io, df_grouped=df_grouped)
 # %%
+df_io
+# %%
+toks, types, meta = encoder.encode_problem('007bbfb7', max_length=2048)
+types
+# %%
 quantile = 0.75
 encoded, meta = encoder.encode_all_with_padding(
     max_length=2048,
@@ -40,13 +45,20 @@ ax.hist([k for k in hist if k < quantile * max(hist.keys())], bins=20)
 ax.set_title("Encoded problem length in tokens (non-skipped)")
 plt.show()
 # %%
-i2t = {v: k for k, v in encoder.tok2id.items()}
-pad = encoder.tok2id['<pad>']
-[i2t[k] for k in encoded['007bbfb7'] if k != pad]
+import jax
+tok = encoder.tok
+[tok.id2tok[k] for k in jax.device_get(encoded[0]['input_ids']) if k != tok.pad_id]
 # %%
-print('Saved:', encoder.save(encoded))
-# from tk import datadir
-# import pandas as pd
-# pd.DataFrame(encoded).T.to_parquet(
-#     datadir / 'michaelhodel_rearc_paddedFilteredTrain.parquet')
+from tk import datadir
+encoding.save_data(encoded, encoder.tok, datadir / 'mhodel_rearc')
+# %%
+ds, tok = encoding.load_data(datadir / 'mhodel_rearc')
+# %%
+assert tok.id2tok == encoder.tok.id2tok
+assert tok.tok2id == encoder.tok.tok2id
+# %%
+ds['input_ids'].shape
+# %%
+[len(x) for x in ds['input_ids']]
+
 # %%
