@@ -18,7 +18,7 @@ from tqdm import trange
 from tk.models.gpt2 import GPT, GPTConfig
 from tk.jaxline import experiment
 from tk.jaxline import utils
-from tk.arc.expt.encoding import SimpleArcGridSeqEncoder
+from tk.arc.expt import encoding
 from flax.training import train_state as tslib
 import jax.numpy as jnp
 import optax
@@ -50,7 +50,7 @@ def get_config(debug: str = '0'):
             block_size=2048,
             num_heads=8,
             num_layers=6,
-            num_embeds=256,
+            num_embeds=512,
             use_bias=True,
             dtype='float32',
         ),
@@ -161,9 +161,10 @@ class Experiment(experiment.AbstractExperiment):
     def __init__(self, mode: str, init_rng: jax.Array, **cfg):
         self.cfg = cfg = config_dict.ConfigDict(cfg)
         super().__init__(mode, init_rng)
-        ds, vocab = SimpleArcGridSeqEncoder.load('hfd')
-        self.tok2id = vocab
-        self.id2tok = {v: k for k, v in vocab.items()}
+        ds, tok = encoding.load_data(tk.datadir / "mhodel_rearc")
+        self.tok = tok
+        self.tok2id = tok.tok2id
+        self.id2tok = tok.id2tok
         r1, init_rng = jax.random.split(init_rng)
         self.dataset = ds.train_test_split(
             test_size=0.1, generator=np.random.default_rng(jax.device_get(r1))
@@ -180,7 +181,7 @@ class Experiment(experiment.AbstractExperiment):
         )
         model_cfg: GPTConfig = cast(GPTConfig, cfg.model_config)
         model_cfg = GPTConfig(**{
-            **model_cfg.__dict__, 'vocab_size': len(vocab)})
+            **model_cfg.__dict__, 'vocab_size': len(self.tok2id)})
         self.model = GPT(config=model_cfg)
         self.state = create_train_state(
             init_rng, self.model, cfg.lr, model_cfg.block_size)
@@ -249,15 +250,16 @@ class Experiment(experiment.AbstractExperiment):
         eval_idx = jax.random.randint(
             sample_rng, (), 0, len(batch)).item()
         prompt = batch['input_ids'][eval_idx]
-        sep_idx = jnp.where(prompt == self.tok2id['<sep>'])[0][0]
+        # get until end of all examples
+        sep_idx = jnp.where(prompt == self.tok.program_start_id)[0][0]
         prompt = prompt[None, :sep_idx+1]
         model_sample = generate(
             model,
             grng, 
             prompt,
-            max_length=5,
+            max_length=25,
             top_p=0.9,
-            terminal_token=self.tok2id['<pad>'],
+            terminal_token=self.tok.pad_id,
         )
         for in_, out_ in zip(
             jax.device_get(prompt), 

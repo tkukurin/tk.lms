@@ -1,60 +1,169 @@
 """Various conversion conveniences.
 """
+from __future__ import annotations
+
 from collections import Counter
 import itertools as it
 from pathlib import Path
+import inspect
 
 import pandas as pd
 import numpy as np
 from loguru import logger
-
 from typing import Callable, Literal
+from tk.arc.p3 import dsl
+
 
 def split_stored_df(df: pd.DataFrame | str | Path) -> tuple[
-    pd.DataFrame, pd.DataFrame, pd.DataFrame, dict
+    pd.DataFrame, pd.DataFrame, pd.DataFrame, Tokenizer
 ]:
-    """process data from p3dsl_to_df.py into useful dataframes and vocab
+    """Process program data.
+    
+    Args:
+        df: DataFrame or path to pickled DataFrame
+        
+    Returns:
+        Tuple of (original_df, io_df, grouped_df, tokenizer)
     """
-    if isinstance(df, str | Path):
+    if isinstance(df, (str, Path)):
         df = pd.read_pickle(df)
     assert isinstance(df, pd.DataFrame)
+    
     df_io = df[['input', 'output']].drop_duplicates()
     df = df.drop(columns=['input', 'output'])
-    # claude also offers an alternative
-    # df_filtered = df.loc[df.index.get_level_values('example_id') == 0]
-    # df_filtered = df_filtered.droplevel('example_id')
-    # this is probably more convenient
+    
     df_grouped = (
         df
-        # keep only where example_id is 0 (all programs should be the same)
         .xs(0, level='example_id', drop_level=True)
         .groupby(level='id')
-        .agg({'function': list, 'arguments': list, 'variable': list })
-    )  # type: ignore
+        .agg({
+            'function': list,
+            'arguments': list, 
+            'variable': list
+        })
+    )
 
-    import inspect
-    from tk.arc.p3 import dsl
     primitive2fn = {
-        name: call for name, call in inspect.getmembers(dsl, inspect.isfunction)
+        name: fn for name, fn in inspect.getmembers(dsl, inspect.isfunction)
     }
 
-    vocab = set(
-        set(x for x in df['function'].unique() if not str(x).startswith('x'))
-        | set(str(x) for x in df['variable'].unique() if not str(x).startswith('x'))
-        | set(str(x) for x in sum(df['arguments'], []) if not str(x).startswith('x'))
-        | set(primitive2fn.keys())
-        | {'I', 'O', 'x', '(', ')', ';', '=', ',', ' ', }
-        | set('1234567890')
-        | {'def', 'solve', 'return'}
-        | {'<pad>', '<sep>'}
+    vocab = {
+        # Program syntax
+        'def', 'solve', 'return', '(', ')', ';', '=', ',', ' ',
+        # Special tokens  
+        '<pad>', '</I>', '</O>', 'I', 'O', '<prog>',
+        # Numbers
+        *'1234567890',
+        # Variables
+        'x',
+        # Functions
+        *primitive2fn.keys()
+    }
+
+    vocab.update(
+        str(x) for x in df['function'].unique() if not str(x).startswith('x')
     )
-    vocab = {v: k for k, v in enumerate(vocab)}
-    assert all(isinstance(str(x), str) for x in vocab.keys()), (
-        "Non-string keys: "
-        f"{[(k, type(k)) for k in vocab if not isinstance(k, str)]}"
+    vocab.update(
+        str(x) for x in df['variable'].unique() if not str(x).startswith('x')
+    )
+    vocab.update(
+        str(x) for x in sum(df['arguments'], []) if not str(x).startswith('x')
     )
 
-    return df, df_io, df_grouped, vocab
+    # Create vocab dict
+    vocab_dict = {token: idx for idx, token in enumerate(vocab)}
+    assert all(isinstance(str(x), str) for x in vocab_dict), (
+        "Non-string keys in vocab"
+    )
+
+    return df, df_io, df_grouped, Tokenizer(vocab_dict)
+
+
+class Tokenizer:
+    """dict semantics + info about special tokens.
+    """
+
+    def __init__(self, tok2id: dict):
+        assert len(set(tok2id.values())) == len(tok2id), (
+            f"Duplicate values in vocab: {[(k, v) for k, v in Counter(tok2id.values()).most_common() if v > 1]}"
+        )
+        self.tok2id = tok2id
+        self.id2tok = {v: k for k, v in self.tok2id.items()}
+        self.pad_token = '<pad>'
+        self.input_end = '</I>'  
+        self.output_end = '</O>'
+        self.program_start = '<prog>'
+        self.separators = {';', ',', '(', ')', '=', ' '}
+
+    def __getitem__(self, key: str) -> int:
+        return self.tok2id[key]
+
+    def items(self):
+        return self.tok2id.items()
+
+    def keys(self):
+        return self.tok2id.keys()
+    
+    def get(self, key: str, default):
+        return self.tok2id.get(key, default)
+    
+    def __len__(self):
+        return len(self.tok2id)
+
+    @property
+    def program_start_id(self) -> int:
+        return self[self.program_start]
+        
+    @property
+    def pad_id(self) -> int:
+        return self[self.pad_token]
+        
+    @property
+    def input_end_id(self) -> int:
+        return self[self.input_end]
+        
+    @property
+    def output_end_id(self) -> int:
+        return self[self.output_end]
+        
+    def is_separator(self, token: str) -> bool:
+        return token in self.separators
+    
+    def save(self, outdir: Path):
+        pd.DataFrame(
+            list(self.tok2id.items()), 
+            columns=['token', 'id'], 
+            dtype=('str', 'int')
+        ).to_parquet(outdir / 'vocab.parquet')
+        return outdir / 'vocab.parquet'
+
+    @classmethod
+    def load(cls, loc: Path | str):
+        loc = Path(loc)
+        if not str(loc).endswith('.parquet'):
+            loc = loc / 'vocab.parquet'
+        vocab = pd.read_parquet(loc)
+        vocab['id'] = vocab['id'].astype(int)
+        vdict = vocab.to_dict('list')
+        self = cls(dict(zip(vdict['token'], vdict['id'])))
+        return self
+
+from datasets import Dataset
+
+def load_data(loc: Path | str):
+    ds = Dataset.load_from_disk(str(loc))
+    ds.set_format(type='jax', columns=['input_ids', 'attention_mask', 'token_type_ids'])
+    tok = Tokenizer.load(loc)
+    return ds, tok
+
+def save_data(ds: Dataset, tok: Tokenizer, loc: Path | str):
+    ds.save_to_disk(str(loc))
+    pd.DataFrame(
+        list(tok.tok2id.items()), 
+        columns=['token', 'id'], 
+        dtype=('str', 'int')
+    ).to_parquet(Path(loc) / 'vocab.parquet')
+
 
 class SimpleArcGridSeqEncoder:
     """Convert ARC problems to sequences of tokens.
@@ -64,52 +173,59 @@ class SimpleArcGridSeqEncoder:
 
     def __init__(
         self, 
-        tok2id: dict[str, int],
+        tok: Tokenizer,
         df_io: pd.DataFrame,
         df_grouped: pd.DataFrame,
     ):
+        self.tok = tok
         self.df_io = df_io
         self.df_grouped = df_grouped
-        self.tok2id = tok2id
-        assert len(set(tok2id.values())) == len(tok2id), (
-            f"Duplicate values in vocab: {[(k, v) for k, v in Counter(tok2id.values()).most_common() if v > 1]}"
-        )
 
     def _encode_problem(self, id: str) -> tuple:
         problems = self.df_io.loc[id].reset_index()
         inputs = [
-            grid_to_flat_tokens(p) + ['<sep>'] for p in problems['input']]
+            grid_to_flat_tokens(p) + [self.tok.input_end] 
+            for p in problems['input']]
         outputs = [
-            grid_to_flat_tokens(p) + ['<sep>'] for p in problems['output']]
+            grid_to_flat_tokens(p) + [self.tok.output_end] 
+            for p in problems['output']]
         row = self.df_grouped.loc[id]
-        program = row_to_tokens(row)
+        program = [self.tok.program_start] + row_to_tokens(row)
         return inputs, outputs, program
 
     def encode_problem(self, id: str, max_length: int = 99999) -> tuple:
         """Encode a problem into a list of tokens"""
         inputs_all, outputs_all, program = self._encode_problem(id)
-        inputs = [[self.tok2id[i] for i in inp] for inp in inputs_all]
-        outputs = [[self.tok2id[i] for i in out] for out in outputs_all]
-        program = [self.tok2id[i] for i in program]
+        inputs = [[self.tok[i] for i in inp] for inp in inputs_all]
+        outputs = [[self.tok[i] for i in out] for out in outputs_all]
+        program = [self.tok[i] for i in program]
         assert len(program) <= max_length, f"Invalid example {id}"
         assert len(inputs) == len(outputs), f"Invalid example {id}, {len(inputs)} != {len(outputs)}"
+        def combine(xss, yss): 
+            outs = [xs + ys for xs, ys in zip(xss, yss)]
+            types = [[0] * len(xs) + [1] * len(ys) for xs, ys in zip(xss, yss)]
+            return outs, types
         flat = lambda xss: [x for xs in xss for x in xs]
-        tokens = flat(inputs) + flat(outputs) + program
+        io_toks, io_types = combine(inputs, outputs)
+        tokens = flat(io_toks) + program
+        types = flat(io_types) + [2] * len(program)
         i = len(inputs) - 1
         skipped = {'in': [], 'out': []}
         while len(tokens) > max_length:
             skipped['in'].append(inputs[i])
             skipped['out'].append(outputs[i])
             inputs, outputs = inputs[:i], outputs[:i]
-            tokens = flat(inputs) + flat(outputs) + program
+            io_toks, io_types = combine(inputs, outputs)
+            tokens = flat(io_toks) + program
+            types = flat(io_types) + [2] * len(program)
             i -= 1
-        if i == -1:
-            logger.warning(
-                f"Problem {id} is too long for {max_length}"
-                f" ({len(program)} program toks, {len(inputs_all)} examples)"
-            )
-            return None, skipped
-        return tokens, skipped
+            if i == -1:
+                logger.warning(
+                    f"Problem {id} is too long for {max_length}"
+                    f" ({len(program)} program toks, {len(inputs_all)} examples)"
+                )
+                return None, None, skipped
+        return tokens, types, skipped
 
     def encode_all_with_padding(
         self, max_length: int = 99999, quantile: float = 0.75) -> tuple:
@@ -123,69 +239,37 @@ class SimpleArcGridSeqEncoder:
         length_hist = {}
         encoded = {}
         truncated = {}
-        for multiix, row in self.df_io.iterrows():
-            i, *_ = multiix  # type: ignore (not sure why complaining)
-            tokens, skipped = self.encode_problem(i, max_length)
+        for i in self.df_io.index.unique(level=0):
+            tokens, types, skipped = self.encode_problem(i, max_length)
             if not tokens: continue
-            if skipped: truncated[i] = skipped
+            if skipped.get('in'): truncated[i] = skipped
             length_hist[len(tokens)] = length_hist.get(len(tokens), 0) + 1
-            encoded[i] = tokens
+            encoded[i] = (tokens, types)
         skipped = {}
         max_length = max(length_hist.keys())
         if quantile is not None:
             qs: pd.Categorical = pd.qcut(list(length_hist.keys()), q=(0, quantile, 1.0))
-            skipped = {k: v for k, v in encoded.items() if len(v) >= qs[-1].left}
-            encoded = {k: v for k, v in encoded.items() if len(v) <  qs[-1].left}
+            skipped = {
+                k: v for k, v in encoded.items() if len(v[0]) >= qs[-1].left}
+            encoded = {
+                k: v for k, v in encoded.items() if len(v[0]) <  qs[-1].left}
             max_length = int(qs[-1].left + 1)
-        encoded_padded = {
-            k: tokens + [self.tok2id['<pad>']] * (max_length - len(tokens)) 
-            for k, tokens in encoded.items()
-        }
+        encoded_padded = Dataset.from_list([
+            {'id': k,
+            'input_ids': tokens + [self.tok.pad_id] * (max_length - len(tokens)),
+            'attention_mask': [1] * len(tokens) + [0] * (max_length - len(tokens)),
+            'token_type_ids': types + [3] * (max_length - len(tokens))
+            }
+            for k, (tokens, types) in encoded.items()
+        ]).with_format(
+            type='jax', 
+            columns=['input_ids', 'attention_mask', 'token_type_ids']
+        )
         meta = dict(
             skipped_full=skipped, 
             truncated=truncated, 
             hist=length_hist)
         return encoded_padded, meta
-
-    @classmethod
-    def outdir(cls):
-        from tk import datadir
-        return datadir / 'mhodel_rearc'
-    
-    def save(self, encoded: dict):
-        """save encoded data to a consistent path.
-        """
-        import pandas as pd
-        outdir = self.outdir()
-        outdir.mkdir(exist_ok=True, parents=True)
-        pd.DataFrame(encoded).T.to_parquet(
-            outdir / 'paddedFilteredTrain.parquet')
-        pd.DataFrame(
-            list(self.tok2id.items()), 
-            columns=['token', 'id'], 
-            dtype=('str', 'int')
-        ).to_parquet(outdir / 'vocab.parquet')
-        return outdir
-
-    @classmethod
-    def load(cls, fmt: Literal['hfd', 'raw'] = 'raw'):
-        outdir = cls.outdir()
-        df = pd.read_parquet(outdir / 'paddedFilteredTrain.parquet')
-        vocab = pd.read_parquet(outdir / 'vocab.parquet')
-        vocab['id'] = vocab['id'].astype(int)
-        vdict = vocab.to_dict('list')
-        tok2id = dict(zip(vdict['token'], vdict['id']))
-        if fmt in ('hfd', 'huggingface', 'hf'):
-            from datasets import Dataset
-            dataset = Dataset.from_dict({
-                'input_ids': df.values,
-                'attention_mask': df.values != tok2id['<pad>'],
-            })
-            dataset.set_format(type='jax', columns=['input_ids', 'attention_mask'])
-            return dataset, tok2id
-        elif fmt in ('raw', ):
-            return df, tok2id
-        raise ValueError(f"Unknown format {fmt}")
 
 
 def row_to_string(row: pd.Series):
