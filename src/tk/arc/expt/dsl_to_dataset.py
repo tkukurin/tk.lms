@@ -1,146 +1,391 @@
 """Create dataset (I, O, program lines) from the DSL in `tk.arc.p3`.
-
-Executing this file results w/something like this in a pickle file in `datadir`:
-  
-| (id, ex_id, step)  | function   | arguments   | variable   | input                             | output           |
-|:-------------------|:-----------|:------------|:-----------|:----------------------------------|:-----------------|
-| ('007bbfb7', 0, 0) | hupscale   | ['I', 3]    | x1         | ((0, 7, 7), (7, 7, 7), (0, 7, 7)) | ((0, 0, 0, 0, 7, 7, 0, 7, 7),... |
-| ('007bbfb7', 0, 1) | vupscale   | ['x1', 3]   | x2         | ((0, 7, 7), (7, 7, 7), (0, 7, 7)) | ((0, 0, 0, 0, 7, 7, 0, 7, 7),... |
 """
 # %%
+from __future__ import annotations
 import pandas as pd
 from tk.arc.p3.dsl import *
 from tk.arc.p3 import dsl, solver
 import inspect
-name_call_tuples = inspect.getmembers(dsl, inspect.isfunction)
-name_call_dict = {name: call for name, call in name_call_tuples}
-other_solvers = inspect.getmembers(solver, inspect.isfunction)
-other_solvers_dict = {
-    name: call for name, call in other_solvers if name.startswith('solve')
+
+dslfunc2callable = {
+    name: call for name, call 
+    in inspect.getmembers(dsl, inspect.isfunction)
 }
 # %%
 import ast
 
-def parse_call(call):
-    src = inspect.getsource(call)
-    return src, ast.parse(src)
-
-print()
-print(
-    parse_call(next(iter(name_call_dict.values())))
-)
-print()
-print(
-    parse_call(next(iter(other_solvers_dict.values())))
-)
-# %%
-
-def get_functions(node, indent=0):
-    # print all function names
-    if isinstance(node, ast.Call):
-        # print('F' + ' ' * (indent - 1) + node.func.id)
-        yield node
-    # print(' ' * indent + node.__class__.__name__)
-    for child in ast.iter_child_nodes(node):
-        yield from get_functions(child, indent + 2)
-
-# %%
-fnodes = get_functions(parse_call(next(iter(other_solvers_dict.values())))[1])
-fnodes = list(fnodes)
-# %%
-def node_repr(node: ast.AST):
+def represent_arg(node: ast.AST):
     if hasattr(node, 'id'):
         return node.id
     if hasattr(node, 'value'):
         return node.value
     if isinstance(node, ast.UnaryOp):
-        op = 1
-        if isinstance(node, ast.USub):
-            op = -1
+        op = -1 if isinstance(node, ast.USub) else 1
         return op * node.operand.value
     raise Exception(f'Unknown node type: {node}')
 
-stats = {}
-# First create time series of function calls for each solver
-for k, v in other_solvers_dict.items():
-    tree = parse_call(v)[1]
-    assignments = {}
-    
-    # Find all assignments in the AST
-    for node in ast.walk(tree):
+
+def get_structured_func_lines(function: Callable | ast.Module):
+    if not isinstance(function, ast.Module):
+        function = ast.parse(inspect.getsource(function))
+    funcs = []
+    arguments = []
+    variables = []
+    for node in ast.walk(function):
         if isinstance(node, ast.Assign):
-            if isinstance(node.value, ast.Call):
-                # Get the target variable name
-                if isinstance(node.targets[0], ast.Name):
-                    assignments[id(node.value)] = node.targets[0].id
-    
-    fnodes = get_functions(tree)
-    fnodes = list(fnodes)
-    
-    func_info = [
-        (node.func.id, 
-        [node_repr(arg) for arg in node.args], 
-        assignments.get(id(node), None)) 
-        for node in fnodes
-    ]
-    
-    func_series = pd.Series([info[0] for info in func_info])
-    arg_series = pd.Series([info[1] for info in func_info])
-    var_series = pd.Series([info[2] for info in func_info])
-    
-    # Calculate n-grams using rolling window
-    ngrams = {
-        n: [tuple(window) for window in func_series.rolling(window=n)]
-        for n in range(1, 4)
-        if n <= len(func_series)
-    }
-    
-    stats[k] = {
-        'ngrams': ngrams,
-        'len': len(fnodes),
-        'series': func_series,
-        'args': arg_series,
-        'vars': var_series
-    }
+            assert isinstance(node.value, ast.Call)
+            funcs.append(node.value.func.id)
+            arguments.append([represent_arg(arg) for arg in node.value.args])
+            variables.append(node.targets[0].id)
+        if isinstance(node, ast.Return):
+            if isinstance(node.value, ast.Name):
+                # we always have `return O`
+                assert node.value.id == 'O'
+    return variables, funcs, arguments
 
+
+pid2solvecall = {
+    name.removeprefix('solve_'): call 
+    for name, call in 
+    inspect.getmembers(solver, inspect.isfunction)
+    if name.startswith('solve_')
+}
+
+# get the function whose string representation contains 'G'
+for name, call in pid2solvecall.items():
+    if name in (
+        '007bbfb7'
+    ):
+        continue
+    if 'G' in (s := inspect.getsource(call)):
+        print(s)
+        print(name)
+        break
+get_structured_func_lines(pid2solvecall['017c7c7b'])
 # %%
-df_fns = pd.DataFrame([
-    (k, i, fn, args, var) 
-    for k, x in stats.items() 
-    for i, (fn, args, var) in enumerate(zip(x['series'], x['args'], x['vars']))
-], columns=['id', 'step', 'function', 'arguments', 'variable'])
 
-df_fns['id'] = df_fns['id'].str.removeprefix('solve_')
+from typing import NamedTuple
 
+class Func(NamedTuple):
+    vars: list[str]
+    funcs: list[str]
+    args: list[list]
+    def zip(self):
+        zippd = zip(self.vars, self.funcs, self.args)
+        return [FuncW(*x) for x in zippd]
+
+class FuncW(NamedTuple):
+    var: str
+    func: str
+    args: list
+    def unzip(self, *other: FuncW):
+        vars_all = [self.var] + [o.var for o in other]
+        funcs_all = [self.func] + [o.func for o in other]
+        args_all = [self.args] + [o.args for o in other]
+        return Func(vars_all, funcs_all, args_all)
+
+class IO(NamedTuple):
+    i: list[dsl.Grid]
+    o: list[dsl.Grid]
+    def zip(self):
+        return [IOW(x, y) for x, y in zip(self.i, self.o)]
+
+class IOW(NamedTuple):
+    i: dsl.Grid
+    o: dsl.Grid
+    def unzip(self, *other: IOW):
+        return IO(
+            [self.i] + [o.i for o in other],
+            [self.o] + [o.o for o in other]
+        )
+
+class ProblemSpec(NamedTuple):
+    id: str
+    train: IO
+    test: IO
+    func: Func
+
+class ProblemSpecW(NamedTuple):
+    id: str
+    train: list[IOW]
+    test: list[IOW]
+    func: FuncW
+
+
+pid2funcrepr = {}
+for problem_id, callable in pid2solvecall.items():
+    variables, funcs, arguments = get_structured_func_lines(callable)
+    pid2funcrepr[problem_id] = Func(variables, funcs, arguments)
 # %%
 from tk.arc.p3 import get_data
-data = get_data('training')
-print(len(data['train']))
-print(len(data['test']))
+sample_id = '007bbfb7'
+input_examples = get_data('training')
+print(len(pid2funcrepr))
+print(len(input_examples['train']))
+print(len(input_examples['test']))
+print()
+print(input_examples['train'][sample_id])
+print(input_examples['test'][sample_id])
 # %%
-df_data = pd.DataFrame([
-    (k, i, 'input', e['input']) 
-    for k, v in data['train'].items() 
-    for i, e in enumerate(v)
-] + [
-    (k, i, 'output', e['output']) 
-    for k, v in data['train'].items() 
-    for i, e in enumerate(v)
-], columns=['id', 'example_id', 'column', 'value'])
+id2train = {
+    k: IO(
+        [v['input'] for v in vs],
+        [v['output'] for v in vs])
+    for k, vs in input_examples['train'].items()}
+id2test = {
+    k: IO(
+        [v['input'] for v in vs],
+        [v['output'] for v in vs])
+    for k, vs in input_examples['test'].items()}
+assert (
+    id2train.keys() == 
+    id2test.keys() == 
+    pid2funcrepr.keys()
+)
+# %%
 
-# Pivot the dataframe to have input and output as columns
-df_data = df_data.pivot(
-    index=['id', 'example_id'], 
-    columns='column', 
-    values='value').reset_index()
-
-df = pd.merge(df_fns, df_data, on='id', how='inner')
-df = df.set_index(['id', 'example_id', 'step']).sort_index()
-
-# parquet doesn't work because arguments are lists
-from tk import datadir
-df.to_pickle(datadir / 'michaelhodel_rearc_data.pkl')
+problems = {
+    k: ProblemSpec(
+        k,
+        id2train[k],
+        id2test[k],
+        pid2funcrepr[k]
+    )
+    for k in pid2funcrepr
+}
+# %%
+from rich import print as rp
+rp(problems[sample_id])
 
 # %%
-print(df[:2].to_markdown())
+# import jax
+
+# def tokenize(value: str | int):
+#     if isinstance(value, (IO, )):
+#         return value
+#     elif value in problems:
+#         return value
+#     elif value in dslfunc2callable:
+#         return value
+#     return list(str(value))
+
+
+# problems_tok = jax.tree.map(
+#     lambda x: tokenize(x), 
+#     problems, 
+#     is_leaf=lambda x: (
+#         isinstance(x, IO)
+#         or isinstance(x, str) 
+#         or isinstance(x, int)
+#     )
+# )
+
+# %%
+import jax
+import functools as ft
+from enum import Enum, auto
+
+
+class TokenType(Enum):
+    IN = auto()
+    OUT = auto()
+    VAR = auto()
+    FUNC = auto()
+    ARG = auto()
+    MISC = auto()
+
+
+def interleave(xs: Iterable, sep: Any) -> list:
+    xs = list(xs)
+    return ft.reduce(lambda acc, x: acc + [sep, x], xs[1:], xs[:1])
+
+def flat(xs):
+    return jax.tree.flatten(xs)[0]
+
+assert interleave([1, 2, 3], 0) == [1, 0, 2, 0, 3]
+assert flat([[1, 2], [3, 4]]) == [1, 2, 3, 4]
+
+
+class SepConfig(NamedTuple):
+    sep_2d: str | None = '\n'
+    sep_io: str | None = '=>'
+    sep_args: str | None = ','
+    sep_func: str | None = ';'
+    sep_var: str | None = '='
+    sep_prog: str | None = '<prog>'
+    sep_end: str | None = '<end>'
+    sep_pad: str | None = '<pad>'
+
+
+def tokenize_with_sep(
+    spec: ProblemSpec,
+    sep_config: SepConfig = SepConfig(),
+    padlen: int | None = None,
+    vocab: set | dict | None = None,
+):
+    """
+    NB: 
+    * all entries of vocab will not be tokenized.
+    * padlen, if provided, pads all examples to given value.
+    * truncation is not performed.
+    """
+    vocab = vocab or {}
+    out = []
+    types = []
+
+    def jointly(
+        xs: str | None | Iterable[str | None], 
+        type: TokenType = TokenType.MISC
+    ):
+        if xs is None: return
+        if isinstance(xs, str): xs = [xs]
+        to_extend = [x for x in xs if x is not None]
+        out.extend(to_extend)
+        types.extend([type] * len(to_extend))
+
+    for gridin, gridout in spec.train.zip():
+        gridin = interleave(gridin, [sep_config.sep_2d])
+        gridout = interleave(gridout, [sep_config.sep_2d])
+        jointly(map(str, flat(gridin)), TokenType.IN)
+        jointly(sep_config.sep_io)
+        jointly(map(str, flat(gridout)), TokenType.OUT)
+
+    jointly(sep_config.sep_prog) 
+    tokenize_arg = lambda a: a if a in vocab else list(a)
+
+    for v, f, a in spec.func.zip():
+        jointly(tokenize_arg(v), TokenType.VAR)
+        jointly(sep_config.sep_var)
+        jointly(tokenize_arg(f), TokenType.FUNC)
+        jointly('(', TokenType.MISC)
+        args_sep = interleave(a, sep_config.sep_args)
+        jointly(flat([tokenize_arg(str(x)) for x in args_sep]), TokenType.ARG)
+        jointly(')', TokenType.MISC)
+        jointly(sep_config.sep_func)
+    jointly(sep_config.sep_end)
+    if padlen is not None:
+        n = padlen - len(out)
+        jointly([sep_config.sep_pad] * n)
+    return out, types
+
+from absl import logging
+
+def maybe_truncate_train_examples(
+    spec: ProblemSpec,
+    max_tokens: int,
+    spec2toks: Callable[[ProblemSpec], tuple],
+):
+    out, types = spec2toks(spec)
+    meta = {'skipped': []}
+    while len(out) > max_tokens:
+        if len(spec.train.i) == 0:
+            logging.warning(f"{spec.id}: Can't truncate further ({len(out)=})")
+            return None, meta
+        meta['skipped'].append(IOW(spec.train.i[-1], spec.train.o[-1]))
+        spec = ProblemSpec(
+            spec.id,
+            IO(
+                spec.train.i[:-1],
+                spec.train.o[:-1]
+            ),
+            spec.test,
+            spec.func
+        )
+        out, types = spec2toks(spec)
+    return (out, types), meta
+
+
+f1, t1 = tokenize_with_sep(
+    problems[sample_id], 
+    vocab=dslfunc2callable,
+    padlen=650,
+)
+print(f1)
+# "unit test"
+assert f1[-1] == '<pad>'
+assert len(f1) == len(t1) == 650
+
+# %%
+maybe_truncate_train_examples(
+    problems[sample_id],
+    256, 
+    ft.partial(
+        tokenize_with_sep,
+        sep_config=SepConfig(), 
+        vocab=dslfunc2callable)
+)
+# %%
+from tk.arc.p3 import const
+constants_from_solve = {x for x in dir(const) if not x.startswith('__')}
+print(f"{constants_from_solve=}")
+# %%
+vocab = set(dslfunc2callable) | set(constants_from_solve)
+problems_tokenized = {
+    k: maybe_truncate_train_examples(
+        spec,
+        max_tokens=2048, 
+        spec2toks=ft.partial(
+            tokenize_with_sep, 
+            sep_config=SepConfig(),
+            padlen=2048,
+            vocab=vocab
+        )
+    )
+    for k, spec in problems.items()
+}
+
+# %%
+
+def induce_vocab(problems_tokenized):
+    vocab = set()
+    for (toks, types), meta in problems_tokenized.values():
+        vocab.update(toks)
+    return {v: i for i, v in enumerate(vocab)}
+
+vocab = induce_vocab(problems_tokenized)
+rp(vocab)
+
+# %%
+
+def encode(
+    toks: list[str], 
+    vocab: dict[str, int]
+):
+    return [vocab[t] for t in toks]
+
+encode(
+    problems_tokenized[sample_id][0][0],
+    vocab=vocab
+)
+# %%
+import datasets as hfd
+dataset = hfd.Dataset.from_dict({
+    'input_ids': [
+        encode(toks, vocab)
+        for (toks, _), _ in problems_tokenized.values()
+        if len(toks) <= 2048
+    ],
+    'token_type_ids': [
+        [t.value for t in types]
+        for (_, types), _ in problems_tokenized.values()
+        if len(types) <= 2048
+    ]
+}).with_format('jax')
+print(dataset)
+print(dataset['input_ids'][0])
+print(dataset['token_type_ids'][0])
+print(type(dataset['token_type_ids'][0]))
+print(len(dataset['token_type_ids'][0]))
+print(set(map(len, dataset['input_ids'])))
+# %%
+import tk
+import json
+dataset.save_to_disk(tk.datadir / 'mhodel_rearc')
+with open(tk.datadir / 'mhodel_rearc' / 'vocab.json', 'w') as f:
+    json.dump(vocab, f)
+logging.info(f"Saved dataset to {tk.datadir / 'mhodel_rearc'}")
+logging.info(f"Vocab size: {len(vocab)}")
+# out = tk.datadir / 'mhodel_rearc'
+# with open(out, 'wb') as f:
+#     pickle.dump(problems_tokenized, f)
 # %%
