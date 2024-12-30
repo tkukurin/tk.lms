@@ -1,18 +1,24 @@
 """Create dataset (I, O, program lines) from the DSL in `tk.arc.p3`.
 """
-# %%
+# %% CONFIG
 from __future__ import annotations
-import pandas as pd
-from tk.arc.p3.dsl import *
-from tk.arc.p3 import dsl, solver
-import inspect
 
-dslfunc2callable = {
-    name: call for name, call 
-    in inspect.getmembers(dsl, inspect.isfunction)
+DO_SAVE = {
+    'base': True,
+    'prog_only': True,
 }
+
 # %%
+import tk
+import json
+import inspect
 import ast
+from pathlib import Path
+
+from typing import *
+from absl import logging
+from tk.arc.p3 import dsl, solver, const
+
 
 def represent_arg(node: ast.AST):
     if hasattr(node, 'id'):
@@ -44,24 +50,20 @@ def get_structured_func_lines(function: Callable | ast.Module):
     return variables, funcs, arguments
 
 
+constants_from_solve = {
+    x for x in dir(const) if not x.startswith('__')
+}
+print(f"{constants_from_solve=}")
+dslfunc2callable = {
+    name: call for name, call 
+    in inspect.getmembers(dsl, inspect.isfunction)
+}
 pid2solvecall = {
     name.removeprefix('solve_'): call 
     for name, call in 
     inspect.getmembers(solver, inspect.isfunction)
     if name.startswith('solve_')
 }
-
-# get the function whose string representation contains 'G'
-for name, call in pid2solvecall.items():
-    if name in (
-        '007bbfb7'
-    ):
-        continue
-    if 'G' in (s := inspect.getsource(call)):
-        print(s)
-        print(name)
-        break
-get_structured_func_lines(pid2solvecall['017c7c7b'])
 # %%
 
 from typing import NamedTuple
@@ -84,31 +86,31 @@ class FuncW(NamedTuple):
         args_all = [self.args] + [o.args for o in other]
         return Func(vars_all, funcs_all, args_all)
 
-class IO(NamedTuple):
+class Io(NamedTuple):
     i: list[dsl.Grid]
     o: list[dsl.Grid]
     def zip(self):
-        return [IOW(x, y) for x, y in zip(self.i, self.o)]
+        return [IoW(x, y) for x, y in zip(self.i, self.o)]
 
-class IOW(NamedTuple):
+class IoW(NamedTuple):
     i: dsl.Grid
     o: dsl.Grid
-    def unzip(self, *other: IOW):
-        return IO(
+    def unzip(self, *other: IoW):
+        return Io(
             [self.i] + [o.i for o in other],
             [self.o] + [o.o for o in other]
         )
 
 class ProblemSpec(NamedTuple):
     id: str
-    train: IO
-    test: IO
+    train: Io
+    test: Io
     func: Func
 
 class ProblemSpecW(NamedTuple):
     id: str
-    train: list[IOW]
-    test: list[IOW]
+    train: list[IoW]
+    test: list[IoW]
     func: FuncW
 
 
@@ -128,12 +130,12 @@ print(input_examples['train'][sample_id])
 print(input_examples['test'][sample_id])
 # %%
 id2train = {
-    k: IO(
+    k: Io(
         [v['input'] for v in vs],
         [v['output'] for v in vs])
     for k, vs in input_examples['train'].items()}
 id2test = {
-    k: IO(
+    k: Io(
         [v['input'] for v in vs],
         [v['output'] for v in vs])
     for k, vs in input_examples['test'].items()}
@@ -156,29 +158,6 @@ problems = {
 # %%
 from rich import print as rp
 rp(problems[sample_id])
-
-# %%
-# import jax
-
-# def tokenize(value: str | int):
-#     if isinstance(value, (IO, )):
-#         return value
-#     elif value in problems:
-#         return value
-#     elif value in dslfunc2callable:
-#         return value
-#     return list(str(value))
-
-
-# problems_tok = jax.tree.map(
-#     lambda x: tokenize(x), 
-#     problems, 
-#     is_leaf=lambda x: (
-#         isinstance(x, IO)
-#         or isinstance(x, str) 
-#         or isinstance(x, int)
-#     )
-# )
 
 # %%
 import jax
@@ -268,7 +247,6 @@ def tokenize_with_sep(
         jointly([sep_config.sep_pad] * n)
     return out, types
 
-from absl import logging
 
 def maybe_truncate_train_examples(
     spec: ProblemSpec,
@@ -281,10 +259,10 @@ def maybe_truncate_train_examples(
         if len(spec.train.i) == 0:
             logging.warning(f"{spec.id}: Can't truncate further ({len(out)=})")
             return None, meta
-        meta['skipped'].append(IOW(spec.train.i[-1], spec.train.o[-1]))
+        meta['skipped'].append(IoW(spec.train.i[-1], spec.train.o[-1]))
         spec = ProblemSpec(
             spec.id,
-            IO(
+            Io(
                 spec.train.i[:-1],
                 spec.train.o[:-1]
             ),
@@ -314,10 +292,6 @@ maybe_truncate_train_examples(
         sep_config=SepConfig(), 
         vocab=dslfunc2callable)
 )
-# %%
-from tk.arc.p3 import const
-constants_from_solve = {x for x in dir(const) if not x.startswith('__')}
-print(f"{constants_from_solve=}")
 # %%
 vocab = set(dslfunc2callable) | set(constants_from_solve)
 problems_tokenized = {
@@ -360,6 +334,7 @@ encode(
 # %%
 import datasets as hfd
 dataset = hfd.Dataset.from_dict({
+    'id': list(problems_tokenized.keys()),
     'input_ids': [
         encode(toks, vocab)
         for (toks, _), _ in problems_tokenized.values()
@@ -370,22 +345,61 @@ dataset = hfd.Dataset.from_dict({
         for (_, types), _ in problems_tokenized.values()
         if len(types) <= 2048
     ]
-}).with_format('jax')
+})
 print(dataset)
 print(dataset['input_ids'][0])
 print(dataset['token_type_ids'][0])
-print(type(dataset['token_type_ids'][0]))
 print(len(dataset['token_type_ids'][0]))
 print(set(map(len, dataset['input_ids'])))
 # %%
-import tk
-import json
-dataset.save_to_disk(tk.datadir / 'mhodel_rearc')
-with open(tk.datadir / 'mhodel_rearc' / 'vocab.json', 'w') as f:
-    json.dump(vocab, f)
-logging.info(f"Saved dataset to {tk.datadir / 'mhodel_rearc'}")
-logging.info(f"Vocab size: {len(vocab)}")
-# out = tk.datadir / 'mhodel_rearc'
-# with open(out, 'wb') as f:
-#     pickle.dump(problems_tokenized, f)
+vocab['__config'] = {
+    **SepConfig()._asdict(),
+}
+print(f"{vocab['__config']=}")
+# %%
+def hfd_save(dataset, vocab, outdir: Path):
+    dataset.save_to_disk(outdir)
+    with open(outdir / 'vocab.json', 'w') as f:
+        json.dump(vocab, f)
+    logging.info(f"Saved dataset to {outdir}")
+    logging.info(f"Vocab size: {len(vocab)}")
+
+
+if DO_SAVE['base']:
+    hfd_save(
+        dataset, vocab, 
+        tk.datadir / 'mhodel_rearc' / 'full'
+    )
+
+# %%
+only_programs_dataset = {}
+# use '<prog>' as separator and extract later tokens
+for k, ((toks, *_), *_) in problems_tokenized.items():
+    toks_after_prog = toks[toks.index('<prog>'):toks.index('<end>')]
+    only_programs_dataset[k] = {'input_ids': toks_after_prog}
+
+# now ensure padding to maxlen
+maxlen = max(len(x['input_ids']) for x in only_programs_dataset.values())
+print(max(only_programs_dataset.values(), key=lambda x: len(x['input_ids'])))
+for k, v in only_programs_dataset.items():
+    v['input_ids'] = v['input_ids'] + [vocab['__config']['sep_pad']] * (maxlen - len(v['input_ids']))
+
+print(f"{maxlen=}")
+assert all(len(v['input_ids']) == maxlen for v in only_programs_dataset.values())
+# %%
+ds_programs = hfd.Dataset.from_dict({
+    'id': [k for k in only_programs_dataset],
+    'input_ids': [
+        encode(v['input_ids'], vocab)
+        for v in only_programs_dataset.values()],
+})
+print(ds_programs)
+print(ds_programs['input_ids'][0])
+# %%
+if DO_SAVE['prog_only']:
+    hfd_save(
+        ds_programs.with_format('jax'),
+        vocab, 
+        tk.datadir / 'mhodel_rearc' / 'prog_only'
+    )
 # %%

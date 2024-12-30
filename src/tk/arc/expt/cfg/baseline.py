@@ -163,13 +163,14 @@ class Experiment(experiment.AbstractExperiment):
     def __init__(self, mode: str, init_rng: jax.Array, **cfg):
         self.cfg = cfg = config_dict.ConfigDict(cfg)
         super().__init__(mode, init_rng)
-        ds = hfd.Dataset.load_from_disk(tk.datadir / "mhodel_rearc")
-        with open(tk.datadir / "mhodel_rearc" / "vocab.json", 'r') as f:
+        ds_dir = tk.datadir / "mhodel_rearc" / "prog_only"
+        ds = hfd.Dataset.load_from_disk(ds_dir)
+        with open(ds_dir / "vocab.json", 'r') as f:
             vocab = json.load(f)
         self.program_start_id = vocab['<prog>']
         self.pad_id = vocab['<pad>']
         self.tok2id = vocab
-        self.id2tok = {v: k for k, v in vocab.items()}
+        self.id2tok = {v: k for k, v in vocab.items() if isinstance(v, int)}
         r1, init_rng = jax.random.split(init_rng)
         self.dataset = ds.train_test_split(
             test_size=0.1, generator=np.random.default_rng(jax.device_get(r1))
