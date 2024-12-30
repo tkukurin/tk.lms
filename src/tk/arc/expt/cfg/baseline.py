@@ -6,6 +6,7 @@ Run:
         --mode=train_eval_multithread
 """
 import tk
+import json
 import os
 import signal
 import logging
@@ -20,7 +21,6 @@ from tqdm import trange
 from tk.models.gpt2 import GPT, GPTConfig
 from tk.jaxline import experiment
 from tk.jaxline import utils
-from tk.arc.expt import encoding
 from flax.training import train_state as tslib
 import jax.numpy as jnp
 import optax
@@ -52,13 +52,13 @@ def get_config(debug: str = '0'):
             block_size=2048,
             num_heads=8,
             num_layers=6,
-            num_embeds=512,
+            num_embeds=256,
             use_bias=True,
-            dtype='float32',
+            dtype='float16',
         ),
     )
 
-    cfg.eval_initial_weights = True
+    cfg.eval_initial_weights = False
     cfg.max_checkpoints_to_keep = 2
 
     # NB, needs to be present in scalar_values as you return from evaluate()
@@ -66,9 +66,9 @@ def get_config(debug: str = '0'):
     cfg.best_model_eval_metric_higher_is_better = False
 
     cfg.training_steps = m(int(5e5), 16)
-    cfg.log_train_data_interval = m(60, 1)
+    cfg.log_train_data_interval = m(50, 1)
     cfg.log_tensors_interval = m(60, 1)
-    cfg.save_checkpoint_interval = m(300, 1)
+    cfg.save_checkpoint_interval = m(100, 1)
     cfg.train_checkpoint_all_hosts = False
     cfg.checkpoint_dir = tk.datadir / 'outputs' / 'arc-ckpt'
     # can set as --config.restore_path during startup 
@@ -163,10 +163,13 @@ class Experiment(experiment.AbstractExperiment):
     def __init__(self, mode: str, init_rng: jax.Array, **cfg):
         self.cfg = cfg = config_dict.ConfigDict(cfg)
         super().__init__(mode, init_rng)
-        ds, tok = encoding.load_data(tk.datadir / "mhodel_rearc")
-        self.tok = tok
-        self.tok2id = tok.tok2id
-        self.id2tok = tok.id2tok
+        ds = hfd.Dataset.load_from_disk(tk.datadir / "mhodel_rearc")
+        with open(tk.datadir / "mhodel_rearc" / "vocab.json", 'r') as f:
+            vocab = json.load(f)
+        self.program_start_id = vocab['<prog>']
+        self.pad_id = vocab['<pad>']
+        self.tok2id = vocab
+        self.id2tok = {v: k for k, v in vocab.items()}
         r1, init_rng = jax.random.split(init_rng)
         self.dataset = ds.train_test_split(
             test_size=0.1, generator=np.random.default_rng(jax.device_get(r1))
@@ -205,12 +208,9 @@ class Experiment(experiment.AbstractExperiment):
             shift_labels = batch['input_ids'][:, 1:]
             loss = optax.softmax_cross_entropy_with_integer_labels(
                 shift_logits, shift_labels)
-            if 'attention_mask' in batch:
-                padding_mask = batch['attention_mask'][:, 1:]
-                loss = loss * padding_mask
-                loss = loss.sum() / padding_mask.sum()
-            else:
-                loss = loss.mean()
+            padding_mask = shift_labels != self.pad_id
+            loss = loss * padding_mask
+            loss = loss.sum() / padding_mask.sum()
             return loss
 
         loss, grads = jax.value_and_grad(loss_fn)(
@@ -236,12 +236,9 @@ class Experiment(experiment.AbstractExperiment):
         shift_labels = batch['input_ids'][:, 1:]
         loss = optax.softmax_cross_entropy_with_integer_labels(
             shift_logits, shift_labels)
-        if 'attention_mask' in batch:
-            padding_mask = batch['attention_mask'][:, 1:]
-            loss = loss * padding_mask
-            loss = loss.sum() / padding_mask.sum()
-        else:
-            loss = loss.mean()
+        padding_mask = shift_labels != self.pad_id
+        loss = loss * padding_mask
+        loss = loss.sum() / padding_mask.sum()
         metrics = {'eval/loss': loss.item()}
         # since eval is multithread, can cause out of sync w train global step 
         # then wandb just disregards the metric. https://wandb.me/define-metric
@@ -253,7 +250,7 @@ class Experiment(experiment.AbstractExperiment):
             sample_rng, (), 0, len(batch)).item()
         prompt = batch['input_ids'][eval_idx]
         # get until end of all examples
-        sep_idx = jnp.where(prompt == self.tok.program_start_id)[0][0]
+        sep_idx = jnp.where(prompt == self.program_start_id)[0][0]
         prompt = prompt[None, :sep_idx+1]
         model_sample = generate(
             model,
@@ -261,7 +258,7 @@ class Experiment(experiment.AbstractExperiment):
             prompt,
             max_length=25,
             top_p=0.9,
-            terminal_token=self.tok.pad_id,
+            terminal_token=self.pad_id,
         )
         for in_, out_ in zip(
             jax.device_get(prompt), 
