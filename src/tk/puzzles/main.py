@@ -1,12 +1,16 @@
 """Based on GPT puzzles by Francois Fleuret <francois@fleuret.org>
 """
 import math, sys, argparse, time, tqdm, os, datetime, warnings
+import wandb
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 from tk.puzzles import gpt, tasks
+from ml_collections import ConfigDict
+import yaml
+from loguru import logger
 
 ######################################################################
 
@@ -18,71 +22,82 @@ else:
 
 ######################################################################
 
-parser = argparse.ArgumentParser(
-    description="An implementation of GPT with cache.",
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-)
+def get_config() -> ConfigDict:
+    config = ConfigDict()
 
-parser.add_argument("--log_filename", type=str, default="train.log", help=" ")
+    # Basic settings
+    config.log_filename = "train.log"
+    config.result_dir = None
+    config.seed = 0
+    config.max_percents_of_test_in_train = 1
 
-parser.add_argument("--result_dir", type=str, default=None)
+    # Training parameters
+    config.nb_epochs = 10000
+    config.batch_size = None
+    config.physical_batch_size = None
+    config.nb_train_samples = None
+    config.nb_test_samples = None
+    config.learning_rate = 1e-4
 
-parser.add_argument("--seed", type=int, default=0)
+    # Model architecture
+    config.model = None
+    config.dim_model = None
+    config.dim_keys = None
+    config.dim_hidden = None
+    config.nb_heads = None
+    config.nb_blocks = None
+    config.dropout = 0.1
 
-parser.add_argument("--max_percents_of_test_in_train", type=int, default=1)
+    # Other settings
+    config.deterministic_synthesis = False
+    config.nb_gpts = 5
+    config.check = False
 
-########################################
+    # Weights & Biases settings
+    config.wandb_project = "gpt-puzzles"
+    config.wandb_entity = None
+    config.wandb_run_name = None
 
-parser.add_argument("--nb_epochs", type=int, default=10000)
-
-parser.add_argument("--batch_size", type=int, default=None)
-
-parser.add_argument("--physical_batch_size", type=int, default=None)
-
-parser.add_argument("--nb_train_samples", type=int, default=None)
-
-parser.add_argument("--nb_test_samples", type=int, default=None)
-
-parser.add_argument("--learning_rate", type=float, default=1e-4)
-
-########################################
-
-parser.add_argument("--model", type=str, default=None)
-
-parser.add_argument("--dim_model", type=int, default=None)
-
-parser.add_argument("--dim_keys", type=int, default=None)
-
-parser.add_argument("--dim_hidden", type=int, default=None)
-
-parser.add_argument("--nb_heads", type=int, default=None)
-
-parser.add_argument("--nb_blocks", type=int, default=None)
-
-parser.add_argument("--dropout", type=float, default=0.1)
-
-########################################
-
-parser.add_argument("--deterministic_synthesis", action="store_true", default=False)
-
-parser.add_argument("--nb_gpts", type=int, default=5)
-
-parser.add_argument("--check", action="store_true", default=False)
+    return config
 
 ######################################################################
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--config", type=str, help="Path to config YAML file")
+
+# Parse just the config argument first
+config_args, _ = parser.parse_known_args()
+
+# Get base config
+args = get_config()
+
+# Override with YAML config if provided
+if config_args.config:
+    with open(config_args.config) as f:
+        yaml_config = yaml.safe_load(f)
+        args.update(yaml_config)
+
+# Add all config options to parser with their current values as defaults
+for k, v in args.items():
+    parser.add_argument(f"--{k}", type=type(v) if v is not None else str, default=v)
+
+# Parse all arguments
 args = parser.parse_args()
 
 if args.result_dir is None:
     args.result_dir = f"results_culture"
 
+# Initialize wandb
+if args.wandb_run_name is None:
+    args.wandb_run_name = f"gpt-{args.model}-{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
 ######################################################################
 
 default_args = {
-    "model": "37M",
-    "batch_size": 100,
-    "nb_train_samples": 250000,
-    "nb_test_samples": 10000,
+    "model": "4M",
+    "batch_size": 256,
+    "nb_train_samples": 256 * 100,
+    "nb_test_samples": 256,
 }
 
 for k, v in default_args.items():
@@ -129,14 +144,11 @@ default_model_args = {
     },
 }
 
-if args.model in default_model_args:
-    for k, v in default_model_args[args.model].items():
-        if getattr(args, k) is None:
-            setattr(args, k, v)
-else:
-    raise ValueError(f"Unknown model {args.model}")
+assert args.model in default_model_args, f"{args.model} not in {default_model_args.keys()}"
 
-######################################################################
+for k, v in default_model_args[args.model].items():
+    if getattr(args, k) is None:
+        setattr(args, k, v)
 
 try:
     os.mkdir(args.result_dir)
@@ -279,14 +291,20 @@ def one_epoch(model, task):
             optimizer.step()
 
     train_perplexity = math.exp(min(100, acc_train_loss / nb_train_samples))
-
+    
+    wandb.log({
+        "train/perplexity": train_perplexity,
+        "train/loss": acc_train_loss / nb_train_samples,
+        "epoch": n_epoch
+    })
+    
     log_string(f"train_perplexity {n_epoch} {train_perplexity}")
 
 
 ######################################################################
 
 
-def run_tests(model, task, deterministic_synthesis):
+def run_tests(model, task: tasks.Task, deterministic_synthesis):
     with torch.autograd.no_grad():
         model.eval()
 
@@ -314,6 +332,22 @@ def run_tests(model, task, deterministic_synthesis):
         )
 
         test_perplexity = math.exp(min(100, acc_test_loss / nb_test_samples))
+        
+        # Log metrics
+        wandb.log({
+            "test/perplexity": test_perplexity,
+            "test/loss": acc_test_loss / nb_test_samples,
+            "test/main_accuracy": main_test_accuracy,
+            "epoch": n_epoch
+        })
+
+        # Log a few generated samples
+        if deterministic_synthesis:
+            samples = task.generate_samples(model, num_samples=5)
+            wandb.log({
+                "test/generations": [wandb.Html(f"<pre>{sample}</pre>") for sample in samples],
+                "epoch": n_epoch
+            })
 
         log_string(f"test_perplexity {n_epoch} {test_perplexity}")
 
@@ -353,12 +387,13 @@ def create_quizzes(
     task.store_new_quizzes(new_quizzes[:nb_for_train], for_train=True)
     task.store_new_quizzes(new_quizzes[nb_for_train:], for_train=False)
 
-    task.save_image(
-        new_quizzes[:72],
-        args.result_dir,
-        f"world_quiz_{n_epoch:04d}_{model.id:02d}.png",
-        log_string,
-    )
+    # Save and log the quiz image
+    image_path = os.path.join(args.result_dir, f"world_quiz_{n_epoch:04d}_{model.id:02d}.png")
+    task.save_image(new_quizzes[:72], args.result_dir, image_path, log_string)
+    wandb.log({
+        f"quiz_samples/model_{model.id}": wandb.Image(image_path),
+        "epoch": n_epoch
+    })
 
 
 ######################################################################
@@ -396,6 +431,13 @@ if args.check:
     accuracy_to_make_quizzes = 0.0
     nb_new_quizzes_for_train = 10
     nb_new_quizzes_for_test = 10
+
+wandb.init(
+    project=args.wandb_project,
+    entity=args.wandb_entity,
+    name=args.wandb_run_name,
+    config=vars(args)
+)
 
 for n_epoch in range(args.nb_epochs):
     a = [(model.id, float(model.main_test_accuracy)) for model in models]
@@ -437,6 +479,15 @@ for n_epoch in range(args.nb_epochs):
         # We update everyone
         for model in models:
             run_tests(model, task, deterministic_synthesis=False)
+    
+    # Log model accuracies
+    for model in models:
+        wandb.log({
+            f"model_{model.id}/accuracy": model.main_test_accuracy,
+            "epoch": n_epoch
+        })
 
+# Close wandb at the end
+wandb.finish()
 
 ######################################################################
