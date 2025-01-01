@@ -1,5 +1,6 @@
 """Based on GPT puzzles by Francois Fleuret <francois@fleuret.org>
 """
+from pathlib import Path
 import math, sys, argparse, time, tqdm, os, datetime, warnings
 import wandb
 
@@ -10,7 +11,6 @@ from torch.nn import functional as F
 from tk.puzzles import gpt, tasks
 from ml_collections import ConfigDict
 import yaml
-from loguru import logger
 
 ######################################################################
 
@@ -58,6 +58,9 @@ def get_config() -> ConfigDict:
     config.wandb_entity = None
     config.wandb_run_name = None
 
+    # Debug settings
+    config.debug = False
+
     return config
 
 ######################################################################
@@ -71,6 +74,8 @@ config_args, _ = parser.parse_known_args()
 # Get base config
 args = get_config()
 
+parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+
 # Override with YAML config if provided
 if config_args.config:
     with open(config_args.config) as f:
@@ -79,17 +84,29 @@ if config_args.config:
 
 # Add all config options to parser with their current values as defaults
 for k, v in args.items():
+    if k in ('debug', ): continue
     parser.add_argument(f"--{k}", type=type(v) if v is not None else str, default=v)
 
 # Parse all arguments
 args = parser.parse_args()
 
-if args.result_dir is None:
-    args.result_dir = f"results_culture"
-
-# Initialize wandb
-if args.wandb_run_name is None:
-    args.wandb_run_name = f"gpt-{args.model}-{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+# Apply debug settings if enabled
+if args.debug:
+    print("!!!WARN!!! Debug mode enabled")
+    debug_config = {
+        "model": "17K",
+        "nb_epochs": 1_000_000,
+        "batch_size": 32,
+        "nb_train_samples": 320,
+        "nb_test_samples": 64,
+        "nb_gpts": 2,
+        "learning_rate": 1e-3,
+        "wandb_project": "gpt-puzzles-debug",
+        "result_dir": 
+    f"data/puzzles/debug/{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    }
+    for k, v in debug_config.items():
+        setattr(args, k, v)
 
 ######################################################################
 
@@ -103,6 +120,14 @@ default_args = {
 for k, v in default_args.items():
     if getattr(args, k) is None:
         setattr(args, k, v)
+
+if args.result_dir is None:
+    args.result_dir = f"data/puzzles/{args.model}/{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+Path(args.result_dir).mkdir(parents=True, exist_ok=True)
+
+if args.wandb_run_name is None:
+    args.wandb_run_name = f"gpt-{args.model}-{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 ######################################################################
 
@@ -149,12 +174,6 @@ assert args.model in default_model_args, f"{args.model} not in {default_model_ar
 for k, v in default_model_args[args.model].items():
     if getattr(args, k) is None:
         setattr(args, k, v)
-
-try:
-    os.mkdir(args.result_dir)
-except FileExistsError:
-    print(f"result directory {args.result_dir} already exists")
-    exit(1)
 
 log_file = open(os.path.join(args.result_dir, args.log_filename), "a")
 
