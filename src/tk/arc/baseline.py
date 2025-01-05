@@ -1,7 +1,7 @@
 """Default jaxline experiment.
 
 Run:
-    python -m tk.arc.expt.run \
+    python -m tk.expt.run \
         --config=path/to/baseline.py \
         --mode=train_eval_multithread
 """
@@ -30,6 +30,9 @@ import numpy as np
 
 from ml_collections import config_dict
 from flax import linen as nn
+from tk.arc.generator import generate_samples
+import inspect
+from tk.arc.p3 import dsl
 
 
 def get_config(debug: str = '0'):
@@ -47,9 +50,12 @@ def get_config(debug: str = '0'):
     cfg.experiment_kwargs = dict(
         lr=1e-4,
         batch_size=4,
+        data=dict(
+            sample_synth_programs=True,
+        ),
         model_config=GPTConfig(
             vocab_size=-1,
-            block_size=2048,
+            block_size=512,
             num_heads=8,
             num_layers=6,
             num_embeds=256,
@@ -61,6 +67,17 @@ def get_config(debug: str = '0'):
     cfg.eval_initial_weights = False
     cfg.max_checkpoints_to_keep = 2
 
+    # NB, needs to be present in scalar_values as you return from evaluate()
+    cfg.best_model_eval_metric = 'eval/loss'
+    cfg.best_model_eval_metric_higher_is_better = False
+
+    cfg.training_steps = m(int(5e5), 16)
+    cfg.log_train_data_interval = m(50, 1)
+    cfg.log_tensors_interval = m(60, 1)
+    cfg.save_checkpoint_interval = m(100, 1)
+    cfg.train_checkpoint_all_hosts = False
+    cfg.checkpoint_dir = tk.datadir / 'outputs' / 'arc-ckpt'
+    # can set as --config.restore_path during startup 
     # NB, needs to be present in scalar_values as you return from evaluate()
     cfg.best_model_eval_metric = 'eval/loss'
     cfg.best_model_eval_metric_higher_is_better = False
@@ -87,17 +104,42 @@ def create_train_state(rng, model, learning_rate, maxseq=2048):
         apply_fn=model.apply, params=params, tx=tx)
 
 
-def _forever_iter(ds: hfd.Dataset, bsiz: int, rng: jax.Array):
+def _forever_iter(
+    ds, bsiz: int, rng: jax.Array):
+    """Get infinite stream of batched samples.
+    
+    Args:
+        ds: Either a HF dataset or (rng, func_arities) tuple for synthetic data
     """
-    NOTE(tk) not sure if there's a better way to do this.
-    """
+    if isinstance(ds, tuple):
+        # Synthetic data case
+        ds_rng, vocab, seqlen, func_arities = ds
+        # import pdb; pdb.set_trace()
+        gen = generate_samples(
+            rng=np.random.default_rng(jax.device_get(ds_rng)),
+            func_arities=func_arities,
+            seed=('I',)
+        )
+        def _inner():
+            while True:
+                batch = []
+                pad = vocab['<pad>']
+                for _ in range(bsiz):
+                    tokens = next(gen)
+                    batch.append([
+                        vocab[t] for t in tokens
+                    ] + [pad] * (seqlen - len(tokens)))
+                yield {'input_ids': jnp.array(batch)}
+        return _inner
+
+    # Original implementation for real data
     gen = np.random.default_rng(jax.device_get(rng))
+    data = jnp.array(ds['input_ids'])
 
     def _inner():
         while True:
-            ds2 = ds.shuffle(generator=gen)
-            yield from ds2.iter(bsiz)
-
+            idxs = gen.choice(data.shape[0], bsiz, replace=False)
+            yield {'input_ids': data[idxs]}
     return _inner
 
 
@@ -152,6 +194,24 @@ def generate(
     return curr_ids
 
 
+def get_func_arities(vocab: dict | None = None) -> dict[str, list[int]]:
+    """Extract function arities from DSL module."""
+    func_arities = {}
+    for name, func in inspect.getmembers(dsl, inspect.isfunction):
+        if name not in (vocab or {}):
+            logging.warning(f"{name=} not in vocab")
+            continue
+        sig = inspect.signature(func)
+        n_params = len(sig.parameters)
+        # Some functions can take variable args
+        if any(p.kind == inspect.Parameter.VAR_POSITIONAL 
+               for p in sig.parameters.values()):
+            func_arities[name] = [n_params-1, n_params, n_params+1]
+        else:
+            func_arities[name] = [n_params]
+    return func_arities
+
+
 class Experiment(experiment.AbstractExperiment):
     CHECKPOINT_ATTRS = {
     }
@@ -163,31 +223,55 @@ class Experiment(experiment.AbstractExperiment):
     def __init__(self, mode: str, init_rng: jax.Array, **cfg):
         self.cfg = cfg = config_dict.ConfigDict(cfg)
         super().__init__(mode, init_rng)
+        
+        # Load vocab
         ds_dir = tk.datadir / "mhodel_rearc" / "prog_only"
-        ds = hfd.Dataset.load_from_disk(ds_dir)
         with open(ds_dir / "vocab.json", 'r') as f:
             vocab = json.load(f)
         self.program_start_id = vocab['<prog>']
         self.pad_id = vocab['<pad>']
         self.tok2id = vocab
         self.id2tok = {v: k for k, v in vocab.items() if isinstance(v, int)}
-        r1, init_rng = jax.random.split(init_rng)
-        self.dataset = ds.train_test_split(
-            test_size=0.1, generator=np.random.default_rng(jax.device_get(r1))
-        )
+        
+        # Setup data iterators
+        r1, r2, r3, init_rng = jax.random.split(init_rng, 4)
         bsiz = cfg.batch_size
-        r1, r2, init_rng = jax.random.split(init_rng, 3)
-        self._train = utils.py_prefetch(
-            _forever_iter(self.dataset['train'], bsiz, r1),
-            buffer_size=2,
-        )
-        self._test = utils.py_prefetch(
-            _forever_iter(self.dataset['test'], bsiz, r2),
-            buffer_size=2,
-        )
+
+        if cfg.data.sample_synth_programs:
+            # Get function arities directly from DSL
+            func_arities = get_func_arities(self.tok2id)
+            logging.info(f"Using {len(func_arities)} functions from DSL")
+            seqlen = cfg.model_config.block_size
+            self._train = utils.py_prefetch(
+                _forever_iter((r1, vocab, seqlen, func_arities), bsiz, r2),
+                buffer_size=2,
+            )
+            self._test = utils.py_prefetch(
+                _forever_iter((r2, vocab, seqlen, func_arities), bsiz, r3), 
+                buffer_size=2,
+            )
+        else:
+            # Load real dataset
+            ds = hfd.Dataset.load_from_disk(ds_dir)
+            self.dataset = ds.train_test_split(
+                test_size=0.1,
+                generator=np.random.default_rng(jax.device_get(r1))
+            )
+            self._train = utils.py_prefetch(
+                _forever_iter(self.dataset['train'], bsiz, r2),
+                buffer_size=2,
+            )
+            self._test = utils.py_prefetch(
+                _forever_iter(self.dataset['test'], bsiz, r3),
+                buffer_size=2,
+            )
+
+        # Initialize model
         model_cfg: GPTConfig = cast(GPTConfig, cfg.model_config)
         model_cfg = GPTConfig(**{
-            **model_cfg.__dict__, 'vocab_size': len(self.tok2id)})
+            **model_cfg.__dict__, 
+            'vocab_size': len(self.tok2id)
+        })
         self.model = GPT(config=model_cfg)
         self.state = create_train_state(
             init_rng, self.model, cfg.lr, model_cfg.block_size)
