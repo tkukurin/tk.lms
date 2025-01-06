@@ -3,13 +3,16 @@
 Run:
     python -m tk.expt.run \
         --config=path/to/baseline.py \
-        --mode=train_eval_multithread
+        --jaxline_mode train_eval_multithread \
+        --jaxline_post_mortem --jaxline_disable_jit  # for debugging
 """
 import tk
 import json
 import os
 import signal
 import logging
+
+from absl import logging
 
 from tk.jaxline import base_config
 from tk.models.gpt2 import GPTConfig
@@ -45,9 +48,11 @@ def get_config(debug: str = '0'):
         return debug_value if (debug in truthy) else default_value
 
     cfg = base_config.get_base_config()
+    cfg.debug = debug in truthy
     cfg.project_name = "ARC-AGI"
     cfg.experiment_class = Experiment
     cfg.experiment_kwargs = dict(
+        debug=cfg.debug,
         lr=1e-4,
         batch_size=4,
         data=dict(
@@ -105,40 +110,50 @@ def create_train_state(rng, model, learning_rate, maxseq=2048):
 
 
 def _forever_iter(
-    ds, bsiz: int, rng: jax.Array):
+    ds, bsiz: int, rng: jax.Array, debug: bool = False):
     """Get infinite stream of batched samples.
     
     Args:
         ds: Either a HF dataset or (rng, func_arities) tuple for synthetic data
     """
-    if isinstance(ds, tuple):
-        # Synthetic data case
+    if isinstance(ds, tuple):  # TODO better than tuple
         ds_rng, vocab, seqlen, func_arities = ds
-        # import pdb; pdb.set_trace()
         gen = generate_samples(
             rng=np.random.default_rng(jax.device_get(ds_rng)),
             func_arities=func_arities,
             seed=('I',)
         )
+        pad = vocab['<pad>']
         def _inner():
-            while True:
-                batch = []
-                pad = vocab['<pad>']
-                for _ in range(bsiz):
-                    tokens = next(gen)
-                    batch.append([
-                        vocab[t] for t in tokens
-                    ] + [pad] * (seqlen - len(tokens)))
-                yield {'input_ids': jnp.array(batch)}
+            if debug:
+                batch = [list(next(gen)) for _ in range(bsiz)]
+                logging.warning(f"DEBUG: 1 batch to overfit:\n{batch}")
+                batch = [[vocab[x] for x in toks] for toks in batch]
+                batch = [toks + [pad] * (seqlen - len(toks)) for toks in batch]
+                batch = {'input_ids': jnp.array(batch)}
+                while True: yield batch
+            else:
+                while True:
+                    batch = []
+                    for _ in range(bsiz):
+                        tokens = next(gen)
+                        batch.append([
+                            vocab[t] for t in tokens
+                        ] + [pad] * (seqlen - len(tokens)))
+                    yield {'input_ids': jnp.array(batch)}
         return _inner
 
     # Original implementation for real data
     gen = np.random.default_rng(jax.device_get(rng))
     data = jnp.array(ds['input_ids'])
+    if debug:
+        data = data[:bsiz]
+        logging.warning(f"DEBUG: 1 batch to overfit ({data.shape=}):\n{data}")
+    nsample = min(len(data), bsiz)
 
     def _inner():
         while True:
-            idxs = gen.choice(data.shape[0], bsiz, replace=False)
+            idxs = gen.choice(data.shape[0], nsample, replace=False)
             yield {'input_ids': data[idxs]}
     return _inner
 
@@ -223,8 +238,6 @@ class Experiment(experiment.AbstractExperiment):
     def __init__(self, mode: str, init_rng: jax.Array, **cfg):
         self.cfg = cfg = config_dict.ConfigDict(cfg)
         super().__init__(mode, init_rng)
-        
-        # Load vocab
         ds_dir = tk.datadir / "mhodel_rearc" / "prog_only"
         with open(ds_dir / "vocab.json", 'r') as f:
             vocab = json.load(f)
@@ -233,21 +246,19 @@ class Experiment(experiment.AbstractExperiment):
         self.tok2id = vocab
         self.id2tok = {v: k for k, v in vocab.items() if isinstance(v, int)}
         
-        # Setup data iterators
         r1, r2, r3, init_rng = jax.random.split(init_rng, 4)
         bsiz = cfg.batch_size
-
         if cfg.data.sample_synth_programs:
             # Get function arities directly from DSL
             func_arities = get_func_arities(self.tok2id)
             logging.info(f"Using {len(func_arities)} functions from DSL")
             seqlen = cfg.model_config.block_size
             self._train = utils.py_prefetch(
-                _forever_iter((r1, vocab, seqlen, func_arities), bsiz, r2),
+                _forever_iter((r1, vocab, seqlen, func_arities), bsiz, r2, cfg.debug),
                 buffer_size=2,
             )
             self._test = utils.py_prefetch(
-                _forever_iter((r2, vocab, seqlen, func_arities), bsiz, r3), 
+                _forever_iter((r2, vocab, seqlen, func_arities), bsiz, r3, cfg.debug), 
                 buffer_size=2,
             )
         else:
@@ -258,11 +269,11 @@ class Experiment(experiment.AbstractExperiment):
                 generator=np.random.default_rng(jax.device_get(r1))
             )
             self._train = utils.py_prefetch(
-                _forever_iter(self.dataset['train'], bsiz, r2),
+                _forever_iter(self.dataset['train'], bsiz, r2, cfg.debug),
                 buffer_size=2,
             )
             self._test = utils.py_prefetch(
-                _forever_iter(self.dataset['test'], bsiz, r3),
+                _forever_iter(self.dataset['test'], bsiz, r3, cfg.debug),
                 buffer_size=2,
             )
 
