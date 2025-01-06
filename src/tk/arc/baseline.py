@@ -72,14 +72,10 @@ def get_config(debug: str = '0'):
     cfg.eval_initial_weights = False
     cfg.max_checkpoints_to_keep = 2
 
-    # NB, needs to be present in scalar_values as you return from evaluate()
-    cfg.best_model_eval_metric = 'eval/loss'
-    cfg.best_model_eval_metric_higher_is_better = False
-
-    cfg.training_steps = m(int(5e5), 16)
+    cfg.training_steps = int(5e5)
     cfg.log_train_data_interval = m(50, 1)
     cfg.log_tensors_interval = m(60, 1)
-    cfg.save_checkpoint_interval = m(100, 1)
+    cfg.save_checkpoint_interval = m(100, 10)
     cfg.train_checkpoint_all_hosts = False
     cfg.checkpoint_dir = tk.datadir / 'outputs' / 'arc-ckpt'
     # can set as --config.restore_path during startup 
@@ -87,14 +83,6 @@ def get_config(debug: str = '0'):
     cfg.best_model_eval_metric = 'eval/loss'
     cfg.best_model_eval_metric_higher_is_better = False
 
-    cfg.training_steps = m(int(5e5), 16)
-    cfg.log_train_data_interval = m(50, 1)
-    cfg.log_tensors_interval = m(60, 1)
-    cfg.save_checkpoint_interval = m(100, 1)
-    cfg.train_checkpoint_all_hosts = False
-    cfg.checkpoint_dir = tk.datadir / 'outputs' / 'arc-ckpt'
-    # can set as --config.restore_path during startup 
-    # NB, needs to be string not e.g. None
     cfg.restore_path = '' #tk.datadir / 'outputs' / 'arc-ckpt' / 'models' / 'latest' / 'step...'
 
     return cfg
