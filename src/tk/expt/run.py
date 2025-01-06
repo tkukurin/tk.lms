@@ -128,6 +128,11 @@ def main(argv):
   if restore_path := FLAGS.config.restore_path:
     _restore_state_to_in_memory_checkpointer(restore_path)
 
+  import platform as p  # NOTE(tk/2025-01) for Mac! Jax metal fails
+  if FLAGS.config.get('force_cpu', False) or p.system() == 'Darwin':
+    logging.warning("Forcing JAX to 'cpu'")
+    jax.config.update('jax_platform_name', 'cpu')
+
   save_dir = os.path.join(FLAGS.config.checkpoint_dir, 'models')
   if FLAGS.config.one_off_evaluate:
     save_model_fn = lambda: None
