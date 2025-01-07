@@ -102,56 +102,71 @@ class ProblemSpecW(NamedTuple):
     func: FuncW
 
 
-pid2solvecall = {
-    name.removeprefix('solve_'): call 
-    for name, call in 
-    inspect.getmembers(solver, inspect.isfunction)
-    if name.startswith('solve_')
-}
-pid2funcrepr = {}
-for problem_id, callable in pid2solvecall.items():
-    variables, funcs, arguments = get_structured_func_lines(callable)
-    pid2funcrepr[problem_id] = Func(variables, funcs, arguments)
-# %%
-from tk.arc.p3 import get_data
-sample_id = '007bbfb7'
-input_examples = get_data('training')
-print(len(pid2funcrepr))
-print(len(input_examples['train']))
-print(len(input_examples['test']))
-print()
-print(input_examples['train'][sample_id])
-print(input_examples['test'][sample_id])
-# %%
-id2train = {
-    k: Io(
-        [v['input'] for v in vs],
-        [v['output'] for v in vs])
-    for k, vs in input_examples['train'].items()}
-id2test = {
-    k: Io(
-        [v['input'] for v in vs],
-        [v['output'] for v in vs])
-    for k, vs in input_examples['test'].items()}
-assert (
-    id2train.keys() == 
-    id2test.keys() == 
-    pid2funcrepr.keys()
-)
-# %%
-
-problems = {
-    k: ProblemSpec(
-        k,
-        id2train[k],
-        id2test[k],
-        pid2funcrepr[k]
+def _get_problems(input_examples: dict[str, dict]) -> tuple:
+    # %%
+    pid2solvecall = {
+        name.removeprefix('solve_'): call 
+        for name, call in 
+        inspect.getmembers(solver, inspect.isfunction)
+        if name.startswith('solve_')
+    }
+    pid2funcrepr = {}
+    for problem_id, callable in pid2solvecall.items():
+        variables, funcs, arguments = get_structured_func_lines(callable)
+        pid2funcrepr[problem_id] = Func(variables, funcs, arguments)
+    # %%
+    id2train = {
+        k: Io(
+            [v['input'] for v in vs],
+            [v['output'] for v in vs])
+        for k, vs in input_examples['train'].items()}
+    id2test = {
+        k: Io(
+            [v['input'] for v in vs],
+            [v['output'] for v in vs])
+        for k, vs in input_examples['test'].items()}
+    assert (
+        id2train.keys() == 
+        id2test.keys() == 
+        pid2funcrepr.keys()
     )
-    for k in pid2funcrepr
-}
+    # %%
+
+    problems = {
+        k: ProblemSpec(
+            k,
+            id2train[k],
+            id2test[k],
+            pid2funcrepr[k]
+        )
+        for k in pid2funcrepr
+    }
+    return id2train, id2test, pid2funcrepr, problems
+
+
+def get_problems(input_examples: dict[str, dict]):
+    *_, problems = _get_problems(input_examples)
+    return problems
+
+
 # %%
-from rich import print as rp
-rp(problems[sample_id])
+ismain = __name__ == '__main__'
+
+if ismain:
+    # %%
+    from tk.arc.p3 import get_data
+    input_examples = get_data('training')
+    id2train, id2test, pid2funcrepr, problems = _get_problems(input_examples)
+
+    sample_id = '007bbfb7'
+    print(len(pid2funcrepr))
+    print(len(input_examples['train']))
+    print(len(input_examples['test']))
+    print()
+    print(input_examples['train'][sample_id])
+    print(input_examples['test'][sample_id])
+    from rich import print as rp
+    rp(problems[sample_id])
 
 # %%
 import jax
@@ -336,44 +351,45 @@ def maybe_truncate_train_examples(
     return (out, types), meta
 
 
-dslfunc2callable = {
-    name: call for name, call 
-    in inspect.getmembers(dsl, inspect.isfunction)
-}
-f1, t1 = tokenize_with_sep(
-    problems[sample_id], 
-    vocab=dslfunc2callable,
-    padlen=650,
-)
-print(f1)
-# "unit test"
-assert f1[-1] == '<pad>'
-assert len(f1) == len(t1) == 650
+if ismain:
+    dslfunc2callable = {
+        name: call for name, call 
+        in inspect.getmembers(dsl, inspect.isfunction)
+    }
+    f1, t1 = tokenize_with_sep(
+        problems[sample_id], 
+        vocab=dslfunc2callable,
+        padlen=650,
+    )
+    print(f1)
+    # "unit test"
+    assert f1[-1] == '<pad>'
+    assert len(f1) == len(t1) == 650
 
-ios, func = detokenize_with_sep(f1)
-print(func.args)
-print(problems[sample_id].func.args)
-assert func.args == problems[sample_id].func.args
+    ios, func = detokenize_with_sep(f1)
+    print(func.args)
+    print(problems[sample_id].func.args)
+    assert func.args == problems[sample_id].func.args
 
-# %%
+    # %%
 
-# check if equal, print diff if not
-# TODO move to test etc
+    # check if equal, print diff if not
+    # TODO move to test etc
 
-def eq(a, b, name):
-    def _chk(xs, ys):
-        if isinstance(xs, (list, tuple, )):
-            return [_chk(x, y) for x, y in zip(xs, ys)]
-        if xs != ys:
-            print(f"NEQ {name}: {xs=}, {ys=}")
+    def eq(a, b, name):
+        def _chk(xs, ys):
+            if isinstance(xs, (list, tuple, )):
+                return [_chk(x, y) for x, y in zip(xs, ys)]
+            if xs != ys:
+                print(f"NEQ {name}: {xs=}, {ys=}")
 
-    _chk(a, b)
+        _chk(a, b)
 
-eq(ios.i, problems[sample_id].train.i, 'train.i')
-eq(ios.o, problems[sample_id].train.o, 'train.o')
-eq(func.vars, problems[sample_id].func.vars, 'func.vars')
-eq(func.funcs, problems[sample_id].func.funcs, 'func.funcs')
-eq(func.args, problems[sample_id].func.args, 'func.args')
+    eq(ios.i, problems[sample_id].train.i, 'train.i')
+    eq(ios.o, problems[sample_id].train.o, 'train.o')
+    eq(func.vars, problems[sample_id].func.vars, 'func.vars')
+    eq(func.funcs, problems[sample_id].func.funcs, 'func.funcs')
+    eq(func.args, problems[sample_id].func.args, 'func.args')
 
 # %%
 # maybe_truncate_train_examples(

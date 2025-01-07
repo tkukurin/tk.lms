@@ -9,13 +9,21 @@ import datasets as hfd
 import functools as ft
 
 import tk
+from tk.arc.p3 import get_data
 from tk.arc.encoding import (
     SepConfig, tokenize_with_sep, induce_vocab, encode,
-    dslfunc2callable, constants_from_solve, problems,
-    ProblemSpec, Io, IoW
+    get_problems, ProblemSpec, Io, IoW, 
 )
 
+
 FLAGS = flags.FLAGS
+# define entry points as actions
+# we don't want to use bool since tehre will be >2 options
+flags.DEFINE_string(
+    'action',
+    'generate',
+    'Action to perform')
+
 flags.DEFINE_string(
     'out_dir',
     str(tk.datadir / "mhodel_rearc"),
@@ -25,9 +33,31 @@ flags.DEFINE_enum(
     'full', 
     ['full', 'prog_only'],
     'Dataset type to generate')
-# flags.mark_flag_as_required('out_dir')
-# flags.mark_flag_as_required('dataset_type')
 
+
+_ARC_DATA_URLS = {
+    "ARC-AGI": "https://github.com/fchollet/ARC-AGI.git",
+    "ARC-llm_baselines": "https://github.com/arcprizeorg/model_baseline.git",
+}
+
+
+def bootstrap():
+    import subprocess
+    try: from tqdm import tqdm
+    except: tqdm = lambda x: x
+    for name, url in tqdm(_ARC_DATA_URLS.items()):
+        clone_to = tk.datadir / name
+        if clone_to.exists():
+            logging.info(f"{clone_to} already exists, pulling updates...")
+            result = subprocess.run(['git', '-C', str(clone_to), 'pull'], capture_output=True)
+        else:
+            result = subprocess.run(['git', 'clone', url, clone_to], capture_output=True)
+        
+        if result.returncode != 0:
+            msg = result.stderr.decode('utf-8')
+            logging.error(f"Failed to {'pull' if clone_to.exists() else 'clone'} {name} from {url}:\n{msg}")
+            continue
+        logging.info(f"Success: {name} to {clone_to.absolute()}")
 
 def maybe_truncate_train_examples(
     spec, max_tokens: int, spec2toks
@@ -53,7 +83,18 @@ def maybe_truncate_train_examples(
 
 
 def generate_full_dataset(problems, max_tokens=2048):
+    import inspect
+    from tk.arc.p3 import dsl, const
+    constants_from_solve = {
+        k: v for k, v in const.__dict__.items()
+        if not k.startswith('_')
+    }
+    dslfunc2callable = {
+        name: call for name, call 
+        in inspect.getmembers(dsl, inspect.isfunction)
+    }
     vocab = set(dslfunc2callable) | set(constants_from_solve)
+
     problems_tokenized = {
         k: maybe_truncate_train_examples(
             spec,
@@ -113,23 +154,33 @@ def main(argv):
     outdir = Path(FLAGS.out_dir)
     dataset_type = FLAGS.dataset_type
 
+    problems = get_problems(get_data('training'))
     dataset, vocab, problems_tokenized = generate_full_dataset(problems)
     
-    print(f'Saving dataset {dataset_type} to {outdir}')
-    if dataset_type == 'full':
-        save_dataset(
-            dataset.with_format('jax'),
-            vocab, 
-            outdir
-        )
-    elif dataset_type == 'prog_only':
-        ds_programs = generate_prog_only_dataset(problems_tokenized, vocab)
-        save_dataset(
-            ds_programs.with_format('jax'),
-            vocab,
-            outdir
-        )
+    if FLAGS.action == 'bootstrap':
+        bootstrap()
+    elif FLAGS.action == 'generate':
+        print(f'Saving dataset {dataset_type} to {outdir}')
+        if dataset_type == 'full':
+            save_dataset(
+                dataset.with_format('jax'),
+                vocab, 
+                outdir
+            )
+        elif dataset_type == 'prog_only':
+            ds_programs = generate_prog_only_dataset(problems_tokenized, vocab)
+            save_dataset(
+                ds_programs.with_format('jax'),
+                vocab,
+                outdir
+            )
+    else:
+        logging.error(f"Unknown action {FLAGS.action}")
+
 
 if __name__ == '__main__':
-    print('running')
-    app.run(main)
+    try: app.run(main)
+    except Exception as e: 
+        logging.exception("Entering PDB")
+        import pdb
+        pdb.post_mortem(e.__traceback__)
