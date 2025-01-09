@@ -1,9 +1,13 @@
+import datasets
 from glob import glob
 import pandas as pd
 import json
 import time
 import random
-import openai
+
+from tqdm import trange
+from tk.utils.log import L
+
 
 def construct_message(agents, question, idx):
     if len(agents) == 0:
@@ -21,8 +25,9 @@ def construct_message(agents, question, idx):
     return {"role": "user", "content": prefix_string}
 
 
-def construct_assistant_message(completion):
-    content = completion["choices"][0]["message"]["content"]
+import openai.types.chat.chat_completion as oai_types
+def construct_assistant_message(completion: oai_types.ChatCompletion):
+    content = completion.choices[0].message.content
     return {"role": "assistant", "content": content}
 
 
@@ -31,11 +36,11 @@ def generate_answer(answer_context):
         from tk.models.gpt import ApiModel
         create = ApiModel()
         completion = create(
-                  model="gpt-3.5-turbo-0301",
+                  model="gpt-3.5-turbo-0125",
                   messages=answer_context,
                   n=1)
-    except:
-        print("retrying due to an error......")
+    except Exception as e:
+        L.error(f"API error: {e}")
         time.sleep(20)
         return generate_answer(answer_context)
 
@@ -51,23 +56,54 @@ def parse_question_answer(df, ix):
     answer = df.iloc[ix]['answer']
     return question, str(answer)
 
-if __name__ == "__main__":
+def main(dbg):
+    if dbg: L.warning("Debug mode enabled")
+
     agents = 3
     rounds = 2
 
-    # tasks = glob("/data/vision/billf/scratch/yilundu/llm_iterative_debate/mmlu/data/test/*.csv")
-
     # load from huggingface
-    import datasets
-    configs = ['abstract_algebra', 'all', 'anatomy', 'astronomy', 'auxiliary_train', 'business_ethics', 'clinical_knowledge', 'college_biology', 'college_chemistry', 'college_computer_science', 'college_mathematics', 'college_medicine', 'college_physics', 'computer_security', 'conceptual_physics', 'econometrics', 'electrical_engineering', 'elementary_mathematics', 'formal_logic', 'global_facts', 'high_school_biology', 'high_school_chemistry', 'high_school_computer_science', 'high_school_european_history', 'high_school_geography', 'high_school_government_and_politics', 'high_school_macroeconomics', 'high_school_mathematics', 'high_school_microeconomics', 'high_school_physics', 'high_school_psychology', 'high_school_statistics', 'high_school_us_history', 'high_school_world_history', 'human_aging', 'human_sexuality', 'international_law', 'jurisprudence', 'logical_fallacies', 'machine_learning', 'management', 'marketing', 'medical_genetics', 'miscellaneous', 'moral_disputes', 'moral_scenarios', 'nutrition', 'philosophy', 'prehistory', 'professional_accounting', 'professional_law', 'professional_medicine', 'professional_psychology', 'public_relations', 'security_studies', 'sociology', 'us_foreign_policy', 'virology', 'world_religions']
+    mmlu_configs = [
+        'abstract_algebra', 'all', 'anatomy', 'astronomy',
+        # does not have test
+        # > The auxiliary_training data could be used for fine-tuning, something
+        # important for models without few-shot capabilities
+        # 'auxiliary_train',
+        'business_ethics', 'clinical_knowledge', 'college_biology',
+        'college_chemistry', 'college_computer_science', 'college_mathematics',
+        'college_medicine', 'college_physics', 'computer_security',
+        'conceptual_physics', 'econometrics', 'electrical_engineering',
+        'elementary_mathematics', 'formal_logic', 'global_facts',
+        'high_school_biology', 'high_school_chemistry',
+        'high_school_computer_science', 'high_school_european_history',
+        'high_school_geography', 'high_school_government_and_politics',
+        'high_school_macroeconomics', 'high_school_mathematics',
+        'high_school_microeconomics', 'high_school_physics',
+        'high_school_psychology', 'high_school_statistics',
+        'high_school_us_history', 'high_school_world_history', 'human_aging',
+        'human_sexuality', 'international_law', 'jurisprudence',
+        'logical_fallacies', 'machine_learning', 'management', 'marketing',
+        'medical_genetics', 'miscellaneous', 'moral_disputes',
+        'moral_scenarios', 'nutrition', 'philosophy', 'prehistory',
+        'professional_accounting', 'professional_law', 'professional_medicine',
+        'professional_psychology', 'public_relations', 'security_studies',
+        'sociology', 'us_foreign_policy', 'virology', 'world_religions'
+    ]
 
-    ld = lambda c: datasets.load_dataset("cais/mmlu", c)["test"].to_pandas()
-    dfs = [ld(config) for config in configs[:2]]
-    import pdb; pdb.set_trace()
+    def ld(c) -> pd.DataFrame:
+        ds = datasets.load_dataset("cais/mmlu", c)
+        if "test" not in ds:
+            L.error(f"{c}: no test")
+            ds = ds["train"]
+        else:
+            ds = ds["test"]
+        return ds.to_pandas()
+
+    dfs = [ld(config) for config in mmlu_configs]
     random.seed(0)
     response_dict = {}
 
-    for i in range(100):
+    for i in trange(2 if dbg else 100):
         df = random.choice(dfs)
         ix = len(df)
         idx = random.randint(0, ix-1)
@@ -78,18 +114,18 @@ if __name__ == "__main__":
 
         for round in range(rounds):
             for i, agent_context in enumerate(agent_contexts):
-
                 if round != 0:
                     agent_contexts_other = agent_contexts[:i] + agent_contexts[i+1:]
                     message = construct_message(agent_contexts_other, question, 2 * round - 1)
                     agent_context.append(message)
 
                 completion = generate_answer(agent_context)
-
                 assistant_message = construct_assistant_message(completion)
                 agent_context.append(assistant_message)
                 print(completion)
 
         response_dict[question] = (agent_contexts, answer)
 
-    json.dump(response_dict, open("mmlu_{}_{}.json".format(agents, rounds), "w"))
+    json.dump(
+        response_dict, 
+        open("mmlu_{}_{}.json".format(agents, rounds), "w"))

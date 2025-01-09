@@ -10,6 +10,8 @@ except: L.warning("Loguru not found")
 # TODO rich
 # from rich import logging
 
+log = L.info
+
 
 def get_logger_write_method(output_dir: Path) -> Callable:
     """I switched to aim from tensorboard for now.
