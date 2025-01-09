@@ -1,7 +1,12 @@
-import openai
+import datasets
 import json
 import numpy as np
 import random
+
+import tqdm
+from tk.debate.utils import generate_answer, construct_assistant_message
+from tk.utils.log import L
+
 
 def construct_message(agents, question, idx):
     if len(agents) == 0:
@@ -19,36 +24,29 @@ def construct_message(agents, question, idx):
     return {"role": "user", "content": prefix_string}
 
 
-def construct_assistant_message(completion):
-    content = completion["choices"][0]["message"]["content"]
-    return {"role": "assistant", "content": content}
-
-
 def read_jsonl(path: str):
     with open(path) as fh:
         return [json.loads(line) for line in fh.readlines() if line]
 
-if __name__ == "__main__":
+def main(dbg: bool):
     agents = 3
     rounds = 2
     random.seed(0)
 
     generated_description = {}
-
-    # questions = read_jsonl("/data/vision/billf/scratch/yilundu/llm_iterative_debate/grade-school-math/grade_school_math/data/test.jsonl")
-    import datasets
+    L.info("Loading gsm4k")
     dftest = datasets.load_dataset("openai/gsm8k", "main")["test"].to_pandas()
     questions = dftest.to_dict(orient='records')
-    import pdb; pdb.set_trace()
     random.shuffle(questions)
+    n = 2 if dbg else 100
 
-    for data in questions[:100]:
+    for data in tqdm.tqdm(questions[:n], desc='questions'):
         question = data['question']
         answer = data['answer']
 
         agent_contexts = [[{"role": "user", "content": """Can you solve the following math problem? {} Explain your reasoning. Your final answer should be a single numerical number, in the form \\boxed{{answer}}, at the end of your response. """.format(question)}] for agent in range(agents)]
 
-        for round in range(rounds):
+        for round in tqdm.trange(rounds, desc='rounds'):
             for i, agent_context in enumerate(agent_contexts):
 
                 if round != 0:
@@ -56,11 +54,7 @@ if __name__ == "__main__":
                     message = construct_message(agent_contexts_other, question, 2*round - 1)
                     agent_context.append(message)
 
-                completion = openai.ChatCompletion.create(
-                          model="gpt-3.5-turbo-0301",
-                          messages=agent_context,
-                          n=1)
-
+                completion = generate_answer(agent_context)
                 assistant_message = construct_assistant_message(completion)
                 agent_context.append(assistant_message)
 

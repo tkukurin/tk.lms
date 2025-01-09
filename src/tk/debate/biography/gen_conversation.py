@@ -1,8 +1,9 @@
 import json
 from pathlib import Path
-import openai
 import random
 from tqdm import tqdm
+from tk.debate.utils import generate_answer, construct_assistant_message
+
 
 def parse_bullets(sentence):
     bullets_preprocess = sentence.split("\n")
@@ -48,12 +49,8 @@ def construct_message(agents, idx, person, final=False):
     return {"role": "user", "content": prefix_string}
 
 
-def construct_assistant_message(completion):
-    content = completion["choices"][0]["message"]["content"]
-    return {"role": "assistant", "content": content}
 
-
-if __name__ == "__main__":
+def main(dbg: bool):
     path = Path(__file__).parent / "article.json"
     with open(path, "r") as f:
         # name -> biography
@@ -68,8 +65,9 @@ if __name__ == "__main__":
     rounds = 2
 
     generated_description = {}
+    n = 2 if dbg else 40
 
-    for person in tqdm(people[:40]):
+    for person in tqdm(people[:n]):
         agent_contexts = [[{"role": "user", "content": "Give a bullet point biography of {} highlighting their contributions and achievements as a computer scientist, with each fact separated with a new line character. ".format(person)}] for agent in range(agents)]
 
         for round in range(rounds):
@@ -84,24 +82,12 @@ if __name__ == "__main__":
                         message = construct_message(agent_contexts_other, 2*round - 1, person=person, final=False)
                     agent_context.append(message)
 
-                from tk.models.gpt import ApiModel
-                create = ApiModel()
-                try:
-                    completion = create(
-                              model="gpt-3.5-turbo-0301",
-                              messages=agent_context,
-                              n=1)
-                except:
-                    completion = create(
-                              model="gpt-3.5-turbo-0301",
-                              messages=agent_context,
-                              n=1)
-
+                completion = generate_answer(agent_context)
                 print(completion)
                 assistant_message = construct_assistant_message(completion)
                 agent_context.append(assistant_message)
 
-            bullets = parse_bullets(completion["choices"][0]['message']['content'])
+            bullets = parse_bullets(completion.choices[0].message.content)
 
             # The LM just doesn't know this person so no need to create debates
             if len(bullets) == 1:
