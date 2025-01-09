@@ -4,6 +4,7 @@ import numpy as np
 import time
 import pickle
 from tqdm import tqdm
+from tk.debate.utils import generate_answer, construct_assistant_message
 
 def parse_bullets(sentence):
     bullets_preprocess = sentence.split("\n")
@@ -23,24 +24,7 @@ def parse_bullets(sentence):
     return bullets
 
 
-def generate_answer(answer_context):
-    try:
-        from tk.models.gpt import ApiModel
-        create = ApiModel()
-        completion = create(
-                  model="gpt-3.5-turbo-0301",
-                  messages=answer_context,
-                  n=1)
-    except:
-        print("retrying due to an error......")
-        time.sleep(20)
-        return generate_answer(answer_context)
-
-    return completion
-
-
 def construct_message(agents, question, idx):
-
     # Use introspection in the case in which there are no other agents.
     if len(agents) == 0:
         return {"role": "user", "content": "Can you verify that your answer is correct. Please reiterate your answer, making sure to state your answer at the end of the response."}
@@ -56,10 +40,6 @@ def construct_message(agents, question, idx):
     prefix_string = prefix_string + "\n\n Use these opinions carefully as additional advice, can you provide an updated answer? Make sure to state your answer at the end of the response.".format(question)
     return {"role": "user", "content": prefix_string}
 
-
-def construct_assistant_message(completion):
-    content = completion["choices"][0]["message"]["content"]
-    return {"role": "assistant", "content": content}
 
 def parse_answer(sentence):
     parts = sentence.split(" ")
@@ -85,14 +65,14 @@ def most_frequent(List):
     return num
 
 
-if __name__ == "__main__":
+def main(dbg: bool):
     answer = parse_answer("My answer is the same as the other agents and AI language model: the result of 12+28*19+6 is 550.")
 
     agents = 2
     rounds = 3
     np.random.seed(0)
 
-    evaluation_round = 100
+    evaluation_round = 2 if dbg else 100
     scores = []
 
     generated_description = {}

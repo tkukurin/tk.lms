@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
-import openai
 import numpy as np
 import time
+from tk.debate.utils import generate_answer, construct_assistant_message
 
 def parse_bullets(sentence):
     bullets_preprocess = sentence.split("\n")
@@ -49,7 +49,7 @@ def filter_people(person):
     people = person.split("(")[0]
     return people
 
-if __name__ == "__main__":
+def main(dbg: bool):
     base = Path(__file__).parent
     with open(base / "biography_1_2.json", "r") as f:
         response = json.load(f)
@@ -93,24 +93,10 @@ if __name__ == "__main__":
             for bullet in gt_bullets:
                 message = [{"role": "user", "content": "Consider the following biography of {}: \n {} \n\n Is the above biography above consistent with the fact below? \n\n {} \n Give a single word answer, yes, no, or uncertain. Carefully check the precise dates and locations between the fact and the above biography.".format(person, bio_bullets, bullet)}]
 
-                try:
-                    from tk.models.gpt import ApiModel
-                    create = ApiModel()
-                    completion = create(
-                              model="gpt-3.5-turbo-0301",
-                              messages=message,
-                              n=1)
-                except Exception as e:
-                    print("sleeping")
-                    time.sleep(20)
-                    continue
-
-                print(message)
-
-                content = completion["choices"][0]["message"]["content"]
+                completion = generate_answer(message)
+                content = completion.choices[0].message.content
                 print(content)
                 accurate = parse_yes_no(content)
-
                 if accurate is not None:
                     accuracies.append(float(accurate))
 
