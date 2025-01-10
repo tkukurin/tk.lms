@@ -50,7 +50,7 @@ def filter_people(person):
     return people
 
 def main(dbg: bool):
-    base = Path(__file__).parent
+    base = Path(".")  # Path(__file__).parent
     with open(base / "biography_1_2.json", "r") as f:
         response = json.load(f)
 
