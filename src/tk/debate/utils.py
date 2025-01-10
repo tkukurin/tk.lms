@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import threading
 from typing import NamedTuple
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
@@ -29,38 +32,54 @@ def construct_assistant_message(completion: oai_types.ChatCompletion):
 
 
 class LocalModel:
-    """adhoc singleton running a local generative model.
+    """Registry pattern for managing local generative models.
 
     Use in place of gpt for local model fueled debate:
-        >>> LocalModel()([{'role': 'user', 'content': '...'}])
+        >>> LocalModel("model-id")  # gets or creates instance
     """
 
-    _instance = None
     _DEFAULT_GEN_KWS = dict(
         return_dict_in_generate=True,
         return_legacy_cache=False,
         max_new_tokens=512,
     )
 
-    def __new__(cls):
-        L.info("Creating LocalModel")
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
+    REGISTRY = {}
+    _REGISTRY_LOCK = threading.Lock()
 
-    def __init__(self):
-        if not hasattr(self, 'model'):
-            model_id = "gg-hf/gemma-2b-it"
-            dtype = torch.bfloat16
-            self.tokenizer = AutoTokenizer.from_pretrained(model_id)
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_id,
-                device_map="cuda",
-                torch_dtype=dtype,
-            )
-            self.model.eval()
-        else:
-            L.info("LocalModel already initialized")
+    def __new__(
+        cls, model_id: str = "gg-hf/gemma-2b-it",
+        gpuclean: bool = True
+    ):
+        with cls._REGISTRY_LOCK:
+            if model_id not in cls.REGISTRY:
+                cls.REGISTRY[model_id] = instance = super().__new__(cls)
+                instance.__init__(model_id)  # Initialize before GPU operations
+            else:
+                instance = cls.REGISTRY[model_id]
+            if gpuclean and torch.cuda.is_available():
+                for k, v in cls.REGISTRY.items():
+                    if k != model_id:
+                        L.debug(f"{k}->cpu")
+                        v.model.cpu()
+                L.debug(f"{model_id}->cuda")
+                instance.model.cuda()
+            return instance
+
+    def __init__(self, model_id: str = "gg-hf/gemma-2b-it", **kw):
+        del kw  # unused
+        if hasattr(self, 'model_id'):  # Skip if already initialized
+            return L.info(f"Reusing LocalModel: {model_id}")
+        L.info(f"Creating new LocalModel: {model_id}")
+        self.model_id = model_id
+        dtype = torch.bfloat16
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            device_map="auto",
+            torch_dtype=dtype,
+        )
+        self.model.eval()
 
     def __call__(self, answer_context):
         inp = self.tokenizer.apply_chat_template(
