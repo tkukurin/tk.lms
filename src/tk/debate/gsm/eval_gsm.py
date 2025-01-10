@@ -117,10 +117,10 @@ def most_frequent(List):
     return num
 
 def main(cfg, dbg, **kw):
-    response_dict = json.load(open("gsm_debate_3_3.json", "r"))
+    from tk.debate import utils
+    response_dict = utils.load(cfg, "gsm", dbg=dbg)
 
     questions = list(response_dict.keys())
-
     accuracies = []
 
     for question in questions:

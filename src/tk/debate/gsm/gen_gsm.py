@@ -60,9 +60,5 @@ def main(cfg, dbg, **kw):
 
         generated_description[question] = (agent_contexts, answer)
 
-    json.dump(generated_description, open("gsm_{}_{}.json".format(agents, rounds), "w"))
-
-    import pdb
-    pdb.set_trace()
-    print(answer)
-    print(agent_context)
+    from tk.debate import utils
+    utils.save(cfg, generated_description, "gsm", dbg=dbg)
