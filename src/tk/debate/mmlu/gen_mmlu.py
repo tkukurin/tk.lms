@@ -7,6 +7,7 @@ import random
 
 from tqdm import trange
 from tk.utils.log import L
+from tk.debate.utils import generate_answer, construct_assistant_message
 
 
 def construct_message(agents, question, idx):
@@ -24,29 +25,6 @@ def construct_message(agents, question, idx):
     prefix_string = prefix_string + """\n\n Using the reasoning from other agents as additional advice, can you give an updated answer? Examine your solution and that other agents step by step. Put your answer in the form (X) at the end of your response.""".format(question)
     return {"role": "user", "content": prefix_string}
 
-
-import openai.types.chat.chat_completion as oai_types
-def construct_assistant_message(completion: oai_types.ChatCompletion):
-    content = completion.choices[0].message.content
-    return {"role": "assistant", "content": content}
-
-
-def generate_answer(answer_context):
-    try:
-        from tk.models.gpt import ApiModel
-        create = ApiModel()
-        completion = create(
-                  model="gpt-3.5-turbo-0125",
-                  messages=answer_context,
-                  n=1)
-    except Exception as e:
-        L.error(f"API error: {e}")
-        time.sleep(20)
-        return generate_answer(answer_context)
-
-    return completion
-
-
 def parse_question_answer(df, ix):
     question = df.iloc[ix, 0]
     a, b, c, d = df.iloc[ix]['choices']
@@ -56,7 +34,7 @@ def parse_question_answer(df, ix):
     answer = df.iloc[ix]['answer']
     return question, str(answer)
 
-def main(dbg):
+def main(cfg, dbg, **kw):
     if dbg: L.warning("Debug mode enabled")
 
     agents = 3

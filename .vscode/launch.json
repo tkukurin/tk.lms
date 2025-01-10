@@ -18,7 +18,7 @@
             "module": "tk.debate",
             "args": [
                 "--cfg", 
-                "src/tk/debate/utils.py",
+                "src/tk/debate/configs/main.py",
                 "--nodbg",
                 "--task=biography",
             ],

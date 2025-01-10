@@ -65,7 +65,7 @@ def most_frequent(List):
     return num
 
 
-def main(dbg: bool):
+def main(cfg, dbg, **kw):
     answer = parse_answer("My answer is the same as the other agents and AI language model: the result of 12+28*19+6 is 550.")
 
     agents = 2

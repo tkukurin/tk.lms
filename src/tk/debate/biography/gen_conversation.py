@@ -50,7 +50,7 @@ def construct_message(agents, idx, person, final=False):
 
 
 
-def main(dbg: bool):
+def main(cfg, dbg, **kw):
     path = Path(__file__).parent / "article.json"
     with open(path, "r") as f:
         # name -> biography
@@ -61,29 +61,25 @@ def main(dbg: bool):
     random.seed(1)
     random.shuffle(people)
 
-    agents = 3
-    rounds = 2
-
     generated_description = {}
     n = 2 if dbg else 40
 
     for person in tqdm(people[:n]):
-        agent_contexts = [[{"role": "user", "content": "Give a bullet point biography of {} highlighting their contributions and achievements as a computer scientist, with each fact separated with a new line character. ".format(person)}] for agent in range(agents)]
+        agent_contexts = [[{"role": "user", "content": "Give a bullet point biography of {} highlighting their contributions and achievements as a computer scientist, with each fact separated with a new line character. ".format(person)}] for agent in range(cfg.agents)]
 
-        for round in range(rounds):
+        for round in range(cfg.rounds):
             for i, agent_context in enumerate(agent_contexts):
 
                 if round != 0:
                     agent_contexts_other = agent_contexts[:i] + agent_contexts[i+1:]
 
-                    if round == (rounds - 1):
+                    if round == (cfg.rounds - 1):
                         message = construct_message(agent_contexts_other, 2*round - 1, person=person, final=True)
                     else:
                         message = construct_message(agent_contexts_other, 2*round - 1, person=person, final=False)
                     agent_context.append(message)
 
                 completion = generate_answer(agent_context)
-                print(completion)
                 assistant_message = construct_assistant_message(completion)
                 agent_context.append(assistant_message)
 
@@ -95,5 +91,5 @@ def main(dbg: bool):
 
         generated_description[person] = agent_contexts
 
-    json.dump(generated_description, open("biography_{}_{}.json".format(agents, rounds), "w"))
-
+    from tk.debate import utils
+    utils.save(cfg, dbg, generated_description, "biography")
