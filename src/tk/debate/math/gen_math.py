@@ -76,15 +76,17 @@ def main(cfg, dbg, **kw):
     scores = []
 
     generated_description = {}
-
     for round in tqdm(range(evaluation_round)):
         a, b, c, d, e, f = np.random.randint(0, 30, size=6)
-
-        answer = a + b * c + d - e * f
-        agent_contexts = [[{"role": "user", "content": """What is the result of {}+{}*{}+{}-{}*{}? Make sure to state your answer at the end of the response.""".format(a, b, c, d, e, f)}] for agent in range(agents)]
+        expr = f"{a}+{b}*{c}+{d}-{e}*{f}"
+        while expr in generated_description:
+            a, b, c, d, e, f = np.random.randint(0, 30, size=6)
+            expr = f"{a}+{b}*{c}+{d}-{e}*{f}"
+        answer = eval(expr)
+        agent_contexts = [[{"role": "user", "content": f"""What is the result of {expr}? Make sure to state your answer at the end of the response."""}] for agent in range(agents)]
 
         content = agent_contexts[0][0]['content']
-        question_prompt = "We seek to find the result of {}+{}*{}+{}-{}*{}?".format(a, b, c, d, e, f)
+        question_prompt = f"We seek to find the result of {expr}?"
 
         for round in range(rounds):
             for i, agent_context in enumerate(agent_contexts):
@@ -93,7 +95,6 @@ def main(cfg, dbg, **kw):
                     agent_contexts_other = agent_contexts[:i] + agent_contexts[i+1:]
                     message = construct_message(agent_contexts_other, question_prompt, 2*round - 1)
                     agent_context.append(message)
-
                     print("message: ", message)
 
                 completion = generate_answer(agent_context)
@@ -105,16 +106,15 @@ def main(cfg, dbg, **kw):
         text_answers = []
 
         for agent_context in agent_contexts:
-            text_answer = string =  agent_context[-1]['content']
+            text_answer =  agent_context[-1]['content']
             text_answer = text_answer.replace(",", ".")
             text_answer = parse_answer(text_answer)
-
             if text_answer is None:
                 continue
-
             text_answers.append(text_answer)
 
-        generated_description[(a, b, c, d, e, f)] = (agent_contexts, answer)
+        generated_description[expr] = dict(
+            contexts=agent_contexts, answer=answer)
 
         try:
             text_answer = most_frequent(text_answers)
@@ -127,8 +127,5 @@ def main(cfg, dbg, **kw):
 
         print("performance:", np.mean(scores), np.std(scores) / (len(scores) ** 0.5))
 
-    pickle.dump(generated_description, open("math_agents{}_rounds{}.p".format(agents, rounds), "wb"))
-    import pdb
-    pdb.set_trace()
-    print(answer)
-    print(agent_context)
+    from tk.debate.utils import save
+    save(cfg, generated_description, "math", dbg=dbg)
