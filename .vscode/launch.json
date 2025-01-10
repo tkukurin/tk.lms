@@ -12,6 +12,25 @@
             "console": "integratedTerminal",
         },
         {
+            "name": "[debate] run",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tk.debate",
+            "args": [
+                "--cfg", 
+                "src/tk/debate/utils.py",
+                "--nodbg",
+                "--task=biography",
+            ],
+            "env": {
+            },
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+            "stopOnEntry": false,
+            "subProcess": true,
+            "redirectOutput": true,
+        },
+        {
             "name": "[jaxline/dbg] train",
             "type": "debugpy",
             "request": "launch",
@@ -28,12 +47,11 @@
                 "JAX_DISABLE_JIT": "1",
                 // "XLA_PYTHON_CLIENT_MEM_FRACTION": 0.2,  // apparently also a thing
             },
-            // I asked GPT what to add
-            "cwd": "${workspaceFolder}", // Set working directory
-            "justMyCode": false, // Allow debugging into third-party libraries
-            "stopOnEntry": false, // Don't stop at the start of the program
-            "subProcess": true, // Debug subprocesses (important for DDP or multithreading)
-            "redirectOutput": true, // Capture stdout/stderr in the Debug Console
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+            "stopOnEntry": false,
+            "subProcess": true,
+            "redirectOutput": true,
         },
         {
             "name": "[jaxline] train",
