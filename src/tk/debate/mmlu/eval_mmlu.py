@@ -1,7 +1,5 @@
-import json
-import openai
+from src.tk.debate import utils
 import numpy as np
-import time
 import re
 
 def parse_bullets(sentence):
@@ -111,7 +109,7 @@ def most_frequent(List):
     return num
 
 def main(cfg, dbg, **kw):
-    response_dict = json.load(open("mmlu_personalities_3_2.json", "r"))
+    response_dict = utils.load(cfg, "mmlu", dbg=dbg)
     questions = list(response_dict.keys())
 
     accuracies = []
