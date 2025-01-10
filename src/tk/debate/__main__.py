@@ -13,6 +13,7 @@ from absl import flags
 from tk.utils.log import L
 import pkgutil
 import importlib
+from ml_collections import config_flags
 
 
 flags.DEFINE_string(
@@ -22,6 +23,11 @@ flags.DEFINE_string(
 flags.DEFINE_boolean(
     'dbg', True, 'Debug mode',
     short_name='d'
+)
+CFG = config_flags.DEFINE_config_file(
+    "cfg",
+    str(Path(__file__).parent / "utils.py"),
+    "Path to the configuration file"
 )
 F = flags.FLAGS
 
@@ -37,7 +43,18 @@ def find_module_with_prefix(package, prefix):
 
 
 def main(argv):
+    cfg = CFG.value
+    L.info(f"{cfg=}")
     utils.post_mortem_debug()
+
+    from tk.debate import utils as dutil # hackyy
+    dutil.generate_answer = dutil.LocalModel(cfg.model)
+
+    do_gen = True
+    if dutil.load(cfg, F.task, dbg=F.dbg):
+        L.error("found result, not proceeding with generation. delete.")
+        do_gen = False
+
     try:
         package = importlib.import_module(f'tk.debate.{F.task}')
         L.info(f'looking in {package.__path__}')
@@ -49,13 +66,17 @@ def main(argv):
             L.error(f"No gen_ or eval_ modules found in {package.__path__}")
             return
 
-        if gen_module:
+        if gen_module and do_gen:
             L.info("Running generation module")
-            gen_module.main(F.dbg)
+            gen_module.main(cfg=cfg, dbg=F.dbg)
+        else:
+            L.warning(f"generation: {do_gen=} (or no module found)")
         
         if eval_module:
             L.info("Running evaluation module")
-            eval_module.main(F.dbg)
+            eval_module.main(cfg=cfg, dbg=F.dbg)
+        else:
+            L.warning("No eval module found")
 
     except ImportError as e:
         print(f"Error: {e}")
