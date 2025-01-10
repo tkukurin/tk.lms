@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import torch
+# from transformers.generation import (
+#     LogitsProcessorList, TopPLogitsWarper, TemperatureLogitsWarper
+# )
+
 from collections import namedtuple
 import json
 from pathlib import Path
 import threading
 from typing import NamedTuple
 from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch
 
 import time
 
@@ -37,7 +41,10 @@ def save(cfg, data, name, base=Path("."), dbg=False):
     d = "dbg" if dbg else "prod"
     a = cfg.agents
     r = cfg.rounds
-    with open(base / f"{name}_{a}_{r}_{d}.json", "w") as f:
+    if (path := base / f"{name}_{a}_{r}_{d}.json").exists():
+        L.error(f"File {path} exists, not overwriting")
+        return None
+    with open(path, "w") as f:
         response = json.dump(data, f)
     return response
 
@@ -45,24 +52,20 @@ def load(cfg, name, base=Path("."), dbg=False):
     d = "dbg" if dbg else "prod"
     a = cfg.agents
     r = cfg.rounds
-    with open(base / f"{name}_{a}_{r}_{d}.json", "r") as f:
+    if not (path := base / f"{name}_{a}_{r}_{d}.json").exists():
+        return None
+    with open(path, "r") as f:
         response = json.load(f)
     return response
 
-def get_config() -> ConfigDict:
-    """ todo move to config or sth """
-    c = ConfigDict()
-    c.model = "gg-hf/gemma-2b-it"
-    c.agents = 3
-    c.rounds = 2
 
-    return c
-
-
-def _oai_adapt(text: str):
+def _oai_adapt(text: str | list):
     """Unnecessarily nested adapter for relevant parts of ChatCompletion"""
     # NB, config_dict has ugly default repr, this is quicker
-    return nspc(choices=[nspc(message=nspc(content=text))])
+    msg = nspc(content=text)
+    if isinstance(text, list):
+        msg = nspc(content=text[-1]["content"], raw=text)
+    return nspc(choices=[nspc(message=msg)])
 
 
 def construct_assistant_message(completion: oai_types.ChatCompletion):
@@ -119,20 +122,38 @@ class LocalModel:
             torch_dtype=dtype,
         )
         self.model.eval()
+        from transformers.pipelines import pipeline
+        self.gen = pipeline(
+            "text-generation",
+            model=self.model,
+            tokenizer=self.tokenizer,
+        )
 
-    def __call__(self, answer_context):
-        inp = self.tokenizer.apply_chat_template(
+    def __call__(self, answer_context, **kw):
+        """just get the generated text"""
+        out = self.gen(
             answer_context, 
-            tokenize=True, 
-            add_generation_prompt=True,
-            return_dict=True,
-            return_tensors="pt")
-        inp = {k: v.to(self.model.device) for k, v in inp.items()}
-        out = self.model.generate(
-            **inp, 
-            **self._DEFAULT_GEN_KWS)
-        out_str = self.tokenizer.decode(out['sequences'][0])
-        return _oai_adapt(out_str)
+            max_new_tokens=512,
+            **kw)
+        return _oai_adapt(out[0]["generated_text"])
+
+    # def _pipeline_custom(self):
+    #     """returns more data than the default version
+    #     """
+    #     inp = self.tokenizer.apply_chat_template(
+    #         answer_context, 
+    #         tokenize=True, 
+    #         add_generation_prompt=True,
+    #         return_dict=True,
+    #         return_tensors="pt")
+    #     inp = {k: v.to(self.model.device) for k, v in inp.items()}
+    #     out = self.model.generate(
+    #         **inp, 
+    #         **self._DEFAULT_GEN_KWS,
+    #         # generation_config= ...
+    #     )
+    #     out_str = self.tokenizer.decode(out['sequences'][0])
+    #     return _oai_adapt(out_str)
 
 
 def generate_answer_gpt(answer_context) -> oai_types.ChatCompletion:

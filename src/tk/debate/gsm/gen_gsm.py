@@ -28,7 +28,7 @@ def read_jsonl(path: str):
     with open(path) as fh:
         return [json.loads(line) for line in fh.readlines() if line]
 
-def main(dbg: bool):
+def main(cfg, dbg, **kw):
     agents = 3
     rounds = 2
     random.seed(0)

@@ -26,7 +26,7 @@ flags.DEFINE_boolean(
 )
 CFG = config_flags.DEFINE_config_file(
     "cfg",
-    str(Path(__file__).parent / "utils.py"),
+    str(Path(__file__).parent / "configs" / "main.py"),
     "Path to the configuration file"
 )
 F = flags.FLAGS
