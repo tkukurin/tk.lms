@@ -104,6 +104,5 @@ def main(cfg, dbg, **kw):
 
         response_dict[question] = (agent_contexts, answer)
 
-    json.dump(
-        response_dict, 
-        open("mmlu_{}_{}.json".format(agents, rounds), "w"))
+    from tk.debate.utils import save
+    save(cfg, response_dict, "mmlu", dbg=dbg)
