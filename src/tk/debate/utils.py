@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections import namedtuple
+import json
+from pathlib import Path
 import threading
 from typing import NamedTuple
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -14,15 +17,51 @@ import openai.types.chat.chat_completion as oai_types
 from ml_collections import ConfigDict
 from types import SimpleNamespace as nspc
 
+import re
+
+Turn = namedtuple("Turn", ["role", "content"])
+
+def process_gemma_response(s: str):
+    # extract via regex: <start_of_turn>NAME\nCONTENT<end_of_turn>
+    pattern = r'<start_of_turn>(.*?)\n(.*?)(?:<end_of_turn>|<eos>)'
+    matches = re.finditer(pattern, s, re.DOTALL)
+    results = []
+    for match in matches:
+        name = match.group(1).strip()
+        content = match.group(2).strip()
+        results.append(Turn(name, content))
+    return results if results else (None, None)
+
+
+def save(cfg, data, name, base=Path("."), dbg=False):
+    d = "dbg" if dbg else "prod"
+    a = cfg.agents
+    r = cfg.rounds
+    with open(base / f"{name}_{a}_{r}_{d}.json", "w") as f:
+        response = json.dump(data, f)
+    return response
+
+def load(cfg, name, base=Path("."), dbg=False):
+    d = "dbg" if dbg else "prod"
+    a = cfg.agents
+    r = cfg.rounds
+    with open(base / f"{name}_{a}_{r}_{d}.json", "r") as f:
+        response = json.load(f)
+    return response
+
+def get_config() -> ConfigDict:
+    """ todo move to config or sth """
+    c = ConfigDict()
+    c.model = "gg-hf/gemma-2b-it"
+    c.agents = 3
+    c.rounds = 2
+
+    return c
+
+
 def _oai_adapt(text: str):
     """Unnecessarily nested adapter for relevant parts of ChatCompletion"""
-    # NB config dict has ugly repr
-    # msg = ConfigDict()
-    # msg.content = text
-    # choice = ConfigDict()
-    # choice.message = msg
-    # mlc = ConfigDict()
-    # mlc.choices = [choice]
+    # NB, config_dict has ugly default repr, this is quicker
     return nspc(choices=[nspc(message=nspc(content=text))])
 
 
@@ -111,4 +150,5 @@ def generate_answer_gpt(answer_context) -> oai_types.ChatCompletion:
     return completion
 
 
-generate_answer = LocalModel()
+generate_answer = None
+

@@ -3,39 +3,33 @@ from pathlib import Path
 import numpy as np
 import time
 from tk.debate.utils import generate_answer, construct_assistant_message
+from tk.debate import utils
+import re
+
 
 def parse_bullets(sentence):
-    bullets_preprocess = sentence.split("\n")
+    # Split text into lines first
+    lines = sentence.split('\n')
     bullets = []
-
-    for bullet in bullets_preprocess:
-        try:
-            idx = bullet.find(next(filter(str.isalpha, bullet)))
-        except:
-            continue
-
-        bullet = bullet[idx:]
-
-        if len(bullet) != 0:
-            bullets.append(bullet)
-
+    
+    # More comprehensive bullet pattern that handles various formats
+    bullet_pattern = r'^\s*(?:[-*•]|\d+\.|[A-Za-z]\)|\([0-9A-Za-z]\))\s*(.+)'
+    
+    for line in lines:
+        match = re.match(bullet_pattern, line.strip())
+        if match:
+            content = match.group(1).strip()
+            if content:  # Only add non-empty content
+                bullets.append(content)
+    
+    # If no bullets found, return the whole text as one bullet
+    if not bullets and sentence.strip():
+        return [sentence.strip()]
+    
     return bullets
 
 
 def parse_yes_no(string):
-    """
-    Parses a string containing "yes" or "no" and returns a boolean value.
-
-    Args:
-        string (str): The string to parse.
-
-    Returns:
-        bool: True if the string contains "yes", False if the string contains "no".
-
-    Raises:
-        ValueError: If the input string does not contain "yes" or "no".
-    """
-
     if "uncertain" in string.lower():
         return None
     elif "yes" in string.lower():
@@ -49,11 +43,9 @@ def filter_people(person):
     people = person.split("(")[0]
     return people
 
-def main(dbg: bool):
-    base = Path(".")  # Path(__file__).parent
-    with open(base / "biography_1_2.json", "r") as f:
-        response = json.load(f)
-
+def main(cfg, dbg, **kw):
+    response = utils.load(cfg, "biography", dbg=dbg)
+    base = Path(__file__).parent
     with open(base / "article.json", "r") as f:
         gt_data = json.load(f)
 
@@ -70,18 +62,18 @@ def main(dbg: bool):
     accuracies = []
 
     for person in people:
-
         if person not in gt_data:
             continue
 
         gt_description = gt_data[person]
         gt_bullets = parse_bullets(gt_description)
-        bio_descriptions = response[person]# [2][-1]['content']
+        bio_descriptions = response[person]
 
         for description in bio_descriptions:
-
             bio_description = description[-1]['content']
-
+            if bio_description.startswith("<bos><start_of_turn>"):
+                r = utils.process_gemma_response(bio_description)
+                bio_description = r[-1][-1]
             bio_bullets = parse_bullets(bio_description)
             if len(bio_bullets) == 1:
                 if len(bio_bullets[0]) < 400:
@@ -95,7 +87,6 @@ def main(dbg: bool):
 
                 completion = generate_answer(message)
                 content = completion.choices[0].message.content
-                print(content)
                 accurate = parse_yes_no(content)
                 if accurate is not None:
                     accuracies.append(float(accurate))
