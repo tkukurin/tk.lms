@@ -76,6 +76,7 @@ def main(cfg, dbg, **kw):
     scores = []
 
     generated_description = {}
+    text_answers_history = []
     for round in tqdm(range(evaluation_round)):
         a, b, c, d, e, f = np.random.randint(0, 30, size=6)
         expr = f"{a}+{b}*{c}+{d}-{e}*{f}"
@@ -126,6 +127,8 @@ def main(cfg, dbg, **kw):
             continue
 
         print("performance:", np.mean(scores), np.std(scores) / (len(scores) ** 0.5))
+        text_answers_history.append(text_answers)
 
+    # Save results
     from tk.debate.utils import save
     save(cfg, generated_description, "math", dbg=dbg)
