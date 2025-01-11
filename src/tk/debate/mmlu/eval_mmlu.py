@@ -21,18 +21,6 @@ def parse_bullets(sentence):
 
 
 def parse_yes_no(string):
-    """
-    Parses a string containing "yes" or "no" and returns a boolean value.
-
-    Args:
-        string (str): The string to parse.
-
-    Returns:
-        bool: True if the string contains "yes", False if the string contains "no".
-
-    Raises:
-        ValueError: If the input string does not contain "yes" or "no".
-    """
     if "yes" in string.lower():
         return True
     elif "no" in string.lower():
@@ -108,8 +96,8 @@ def most_frequent(List):
 
     return num
 
-def main(cfg, dbg, **kw):
-    response_dict = utils.load(cfg, "mmlu", dbg=dbg)
+def main(cfg, **kw):
+    response_dict = utils.load(cfg)
     questions = list(response_dict.keys())
 
     accuracies = []
@@ -131,10 +119,5 @@ def main(cfg, dbg, **kw):
 
         if accurate is not None:
             accuracies.append(float(accurate))
-        else:
-            import pdb
-            pdb.set_trace()
-            print(gt)
-
         print("accuracies:", np.mean(accuracies), np.std(accuracies) / (len(accuracies) ** 0.5))
 

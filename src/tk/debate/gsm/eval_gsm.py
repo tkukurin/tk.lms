@@ -21,18 +21,6 @@ def parse_bullets(sentence):
 
 
 def parse_yes_no(string):
-    """
-    Parses a string containing "yes" or "no" and returns a boolean value.
-
-    Args:
-        string (str): The string to parse.
-
-    Returns:
-        bool: True if the string contains "yes", False if the string contains "no".
-
-    Raises:
-        ValueError: If the input string does not contain "yes" or "no".
-    """
     if "yes" in string.lower():
         return True
     elif "no" in string.lower():
@@ -116,9 +104,9 @@ def most_frequent(List):
 
     return num
 
-def main(cfg, dbg, **kw):
+def main(cfg, **kw):
     from tk.debate import utils
-    response_dict = utils.load(cfg, "gsm", dbg=dbg)
+    response_dict = utils.load(cfg)
 
     questions = list(response_dict.keys())
     accuracies = []
@@ -129,7 +117,6 @@ def main(cfg, dbg, **kw):
         pred_solutions = []
         for response in responses:
             pred_solution = response[-1]['content']
-
             pred_solutions.append(pred_solution)
 
         accurate = compute_accuracy(gt, pred_solutions)

@@ -7,14 +7,12 @@ from tk.debate.math.plot import (
 )
 
 
-def main(cfg, dbg=False):
+def main(cfg, **kw):
     """Evaluate and visualize math debate results."""
-    # Load generated data
-    data = load(cfg, "math", dbg=dbg)
+    data = load(cfg)
     if not data:
         raise ValueError("No data found to evaluate")
     
-    # Extract scores and answers from the data
     scores = []
     text_answers_history = []
     for expr, result in data.items():
@@ -34,18 +32,11 @@ def main(cfg, dbg=False):
                 continue
         text_answers_history.append(answers)
     
-    # Create plots directory
-    import tk
-    save_dir = tk.datadir / "math_plots"
-    save_dir.mkdir(exist_ok=True, parents=True)
-    
-    # Generate plots
-    plot_accuracy_progression(
-        scores, len(data), 
-        save_path=save_dir / "accuracy.png")
-    plot_agent_answers(
-        text_answers_history, 
-        save_path=save_dir / "agent_answers.png")
-    plot_agent_agreement(
-        text_answers_history, 
-        save_path=save_dir / "agreement.png")
+    figs = [
+    plot_accuracy_progression(scores, len(data)),
+        
+    plot_agent_answers(text_answers_history),
+    plot_agent_agreement(text_answers_history),
+    ]
+    from tk.debate import utils
+    utils.save(cfg, figs)

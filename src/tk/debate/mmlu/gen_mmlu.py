@@ -34,11 +34,9 @@ def parse_question_answer(df, ix):
     answer = df.iloc[ix]['answer']
     return question, str(answer)
 
-def main(cfg, dbg, **kw):
-    if dbg: L.warning("Debug mode enabled")
-
-    agents = 3
-    rounds = 2
+def main(cfg, **kw):
+    agents = cfg.agents
+    rounds = cfg.rounds
 
     # load from huggingface
     mmlu_configs = [
@@ -78,10 +76,10 @@ def main(cfg, dbg, **kw):
         return ds.to_pandas()
 
     dfs = [ld(config) for config in mmlu_configs]
-    random.seed(0)
+    random.seed(cfg.seed)
     response_dict = {}
 
-    for i in trange(2 if dbg else 100):
+    for i in trange(2 if cfg.dbg else 100):
         df = random.choice(dfs)
         ix = len(df)
         idx = random.randint(0, ix-1)
@@ -105,4 +103,4 @@ def main(cfg, dbg, **kw):
         response_dict[question] = (agent_contexts, answer)
 
     from tk.debate.utils import save
-    save(cfg, response_dict, "mmlu", dbg=dbg)
+    save(cfg, response_dict)

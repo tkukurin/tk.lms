@@ -36,23 +36,104 @@ def process_gemma_response(s: str):
         results.append(Turn(name, content))
     return results if results else (None, None)
 
+import tk
+_BASE = tk.datadir / "debate"
 
-def save(cfg, data, name, base=Path("."), dbg=False):
-    d = "dbg" if dbg else "prod"
+import numpy as np
+import matplotlib.pyplot as plt
+def combine_figures(figs, save_path=None, grid_size=None):
+    """Combine multiple figures into a single output.
+    
+    For TIFF files: saves as multi-page TIFF
+    For other formats: combines into grid layout
+    
+    Args:
+        figs: List of matplotlib figures to combine
+        save_path: Optional path to save combined figure
+        grid_size: Optional tuple of (rows, cols). If None, automatically determined
+    """
+    if save_path and str(save_path).lower().endswith('.tiff'):
+        # For TIFF files, save as multi-page
+        from PIL import Image
+        images = []
+        for fig in figs:
+            # Convert each figure to PIL Image
+            fig.canvas.draw()
+            w, h = fig.canvas.get_width_height()
+            buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            buf.shape = (h, w, 3)
+            images.append(Image.fromarray(buf))
+        
+        images[0].save(save_path, 
+                      save_all=True, 
+                      append_images=images[1:], 
+                      resolution=300)
+        return images
+    else:
+        # For other formats, keep existing grid layout behavior
+        n_figs = len(figs)
+        if grid_size is None:
+            n_cols = int(np.ceil(np.sqrt(n_figs)))
+            n_rows = int(np.ceil(n_figs / n_cols))
+        else:
+            n_rows, n_cols = grid_size
+            
+        fig_combined = plt.figure(figsize=(n_cols * 10, n_rows * 6))
+        
+        for i, fig in enumerate(figs):
+            if i >= n_rows * n_cols:
+                break
+                
+            ax = fig_combined.add_subplot(n_rows, n_cols, i + 1)
+            
+            for ax_orig in fig.axes:
+                ax.plot(*[l.get_data() for l in ax_orig.lines][0])
+                ax.scatter(*[s.get_offsets().T for s in ax_orig.collections][0]) if ax_orig.collections else None
+                
+                ax.set_xlabel(ax_orig.get_xlabel())
+                ax.set_ylabel(ax_orig.get_ylabel())
+                ax.set_title(ax_orig.get_title())
+                ax.grid(ax_orig.get_grid())
+                
+                if ax_orig.get_ylim() != (0, 1):
+                    ax.set_ylim(ax_orig.get_ylim())
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path)
+            plt.close()
+            
+        return fig_combined
+
+
+def save(cfg: ConfigDict, data, base=_BASE):
+    L.info(f"saving {cfg.task} data to {base}")
+    d = "dbg" if cfg.dbg else "prod"
     a = cfg.agents
     r = cfg.rounds
-    if (path := base / f"{name}_{a}_{r}_{d}.json").exists():
-        L.error(f"File {path} exists, not overwriting")
-        return None
-    with open(path, "w") as f:
-        response = json.dump(data, f)
+    if isinstance(data, dict):
+        n = f"{cfg.task}_{a}_{r}_{d}.json"
+        if (path := base / n).exists():
+            L.error(f"File {path} exists, not overwriting")
+            return None
+        with open(path, "w") as f:
+            data["_config"] = cfg.to_json()
+            response = json.dump(data, f)
+    else:
+        if not isinstance(data, list): data = [data]
+        n = f"{cfg.task}_{a}_{r}_{d}.tiff"
+        if (path := base / n).exists():
+            L.error(f"File {path} exists, not overwriting")
+            return None
+        response = combine_figures(data, path)
     return response
 
-def load(cfg, name, base=Path("."), dbg=False):
-    d = "dbg" if dbg else "prod"
+def load(cfg, base=_BASE):
+    d = "dbg" if cfg.dbg else "prod"
     a = cfg.agents
     r = cfg.rounds
-    if not (path := base / f"{name}_{a}_{r}_{d}.json").exists():
+    if not (path := base / f"{cfg.task}_{a}_{r}_{d}.json").exists():
         return None
     with open(path, "r") as f:
         response = json.load(f)
