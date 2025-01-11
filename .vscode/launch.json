@@ -17,10 +17,30 @@
             "request": "launch",
             "module": "tk.debate",
             "args": [
-                "--cfg", 
+                "--c", 
                 "src/tk/debate/configs/main.py",
-                "--nodbg",
-                "--task=biography",
+                "--c.dbg=False",
+                "--c.task=biography",
+                "--c.agents=5",
+            ],
+            "env": {
+            },
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+            "stopOnEntry": false,
+            "subProcess": true,
+            "redirectOutput": true,
+        },
+        {
+            "name": "[debate] plot",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tk.debate",
+            "args": [
+                "--c", 
+                "src/tk/debate/configs/main.py",
+                "--c.dbg=True",
+                "--c.task=plot",
             ],
             "env": {
             },
