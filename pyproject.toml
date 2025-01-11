@@ -77,3 +77,15 @@ build-backend = "setuptools.build_meta"
 venvPath = "."
 venv = ".venv"
 
+[tool.yapf]
+based_on_style = "google"
+split_penalty_after_opening_bracket = 0
+dedent_closing_brackets = false
+column_limit = 80
+indent_width = 2
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.3.3",
+]
+

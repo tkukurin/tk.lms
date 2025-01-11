@@ -3736,6 +3736,11 @@ bnb = [
     { name = "bitsnbytes" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "accelerate" },
@@ -3772,9 +3777,12 @@ requires-dist = [
     { name = "traceback-with-variables" },
     { name = "transformers", extras = ["sentencepiece"] },
     { name = "wandb", specifier = ">=0.19.1" },
-    { name = "wrapt" },
+    { name = "wrapt", specifier = ">=1.17.0" },
     { name = "xminigrid" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest" }]
 
 [[package]]
 name = "tokenizers"
