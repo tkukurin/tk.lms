@@ -2,9 +2,10 @@
 
 unchecked, lightly bugfixed Claude generation.
 """
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
-from pathlib import Path
 
 
 def plot_agent_agreement(agent_responses, save_path=None):

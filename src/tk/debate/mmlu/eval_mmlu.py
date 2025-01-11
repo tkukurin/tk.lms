@@ -1,6 +1,8 @@
-from src.tk.debate import utils
-import numpy as np
 import re
+
+import numpy as np
+
+from src.tk.debate import utils
 
 
 def parse_bullets(sentence):

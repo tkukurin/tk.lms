@@ -1,10 +1,11 @@
-import datasets
 import json
-import numpy as np
 import random
 
+import datasets
+import numpy as np
 import tqdm
-from tk.debate.utils import generate_answer, construct_assistant_message
+
+from tk.debate.utils import construct_assistant_message, generate_answer
 from tk.utils.log import L
 
 

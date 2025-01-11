@@ -1,10 +1,12 @@
-import openai
 import json
-import numpy as np
-import time
 import pickle
+import time
+
+import numpy as np
+import openai
 from tqdm import tqdm
-from tk.debate.utils import generate_answer, construct_assistant_message
+
+from tk.debate.utils import construct_assistant_message, generate_answer
 
 
 def parse_bullets(sentence):

@@ -1,10 +1,12 @@
 import json
-from pathlib import Path
-import numpy as np
-import time
-from tk.debate.utils import generate_answer, construct_assistant_message
-from tk.debate import utils
 import re
+import time
+from pathlib import Path
+
+import numpy as np
+
+from tk.debate import utils
+from tk.debate.utils import construct_assistant_message, generate_answer
 
 
 def parse_bullets(sentence):

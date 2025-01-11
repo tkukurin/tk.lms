@@ -1,13 +1,14 @@
-import datasets
-from glob import glob
-import pandas as pd
 import json
-import time
 import random
+import time
+from glob import glob
 
+import datasets
+import pandas as pd
 from tqdm import trange
+
+from tk.debate.utils import construct_assistant_message, generate_answer
 from tk.utils.log import L
-from tk.debate.utils import generate_answer, construct_assistant_message
 
 
 def construct_message(agents, question, idx):

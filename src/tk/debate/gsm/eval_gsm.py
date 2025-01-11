@@ -1,6 +1,7 @@
 import json
-import numpy as np
 import re
+
+import numpy as np
 
 
 def parse_bullets(sentence):
