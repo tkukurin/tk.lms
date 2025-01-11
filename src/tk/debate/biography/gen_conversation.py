@@ -50,7 +50,7 @@ def construct_message(agents, idx, person, final=False):
 
 
 
-def main(cfg, dbg, **kw):
+def main(cfg, **kw):
     path = Path(__file__).parent / "article.json"
     with open(path, "r") as f:
         # name -> biography
@@ -62,7 +62,7 @@ def main(cfg, dbg, **kw):
     random.shuffle(people)
 
     generated_description = {}
-    n = 2 if dbg else 40
+    n = 2 if cfg.dbg else 40
 
     for person in tqdm(people[:n]):
         agent_contexts = [[{"role": "user", "content": "Give a bullet point biography of {} highlighting their contributions and achievements as a computer scientist, with each fact separated with a new line character. ".format(person)}] for agent in range(cfg.agents)]

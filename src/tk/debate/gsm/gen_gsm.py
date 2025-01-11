@@ -28,10 +28,11 @@ def read_jsonl(path: str):
     with open(path) as fh:
         return [json.loads(line) for line in fh.readlines() if line]
 
-def main(cfg, dbg, **kw):
-    agents = 3
-    rounds = 2
-    random.seed(0)
+def main(cfg, **kw):
+    dbg = cfg.dbg
+    agents = cfg.agents
+    rounds = cfg.rounds
+    random.seed(cfg.seed)
 
     generated_description = {}
     L.info("Loading gsm4k")
@@ -48,7 +49,6 @@ def main(cfg, dbg, **kw):
 
         for round in tqdm.trange(rounds, desc='rounds'):
             for i, agent_context in enumerate(agent_contexts):
-
                 if round != 0:
                     agent_contexts_other = agent_contexts[:i] + agent_contexts[i+1:]
                     message = construct_message(agent_contexts_other, question, 2*round - 1)
@@ -61,4 +61,4 @@ def main(cfg, dbg, **kw):
         generated_description[question] = (agent_contexts, answer)
 
     from tk.debate import utils
-    utils.save(cfg, generated_description, "gsm", dbg=dbg)
+    utils.save(cfg, generated_description)

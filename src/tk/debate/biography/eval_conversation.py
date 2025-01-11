@@ -43,8 +43,8 @@ def filter_people(person):
     people = person.split("(")[0]
     return people
 
-def main(cfg, dbg, **kw):
-    response = utils.load(cfg, "biography", dbg=dbg)
+def main(cfg, **kw):
+    response = utils.load(cfg, "biography")
     base = Path(__file__).parent
     with open(base / "article.json", "r") as f:
         gt_data = json.load(f)

@@ -65,12 +65,13 @@ def most_frequent(List):
     return num
 
 
-def main(cfg, dbg, **kw):
+def main(cfg, **kw):
     answer = parse_answer("My answer is the same as the other agents and AI language model: the result of 12+28*19+6 is 550.")
 
-    agents = 2
-    rounds = 3
-    np.random.seed(0)
+    dbg = cfg.dbg
+    agents = cfg.agents
+    rounds = cfg.rounds
+    np.random.seed(cfg.seed)
 
     evaluation_round = 2 if dbg else 100
     scores = []
