@@ -32,8 +32,7 @@ def filter_people(person):
 
 def construct_message(agents, idx, person, final=False):
   prefix_string = "Here are some bullet point biographies of {} given by other agents: ".format(
-      person
-  )
+      person)
 
   if len(agents) == 0:
     return {
@@ -51,17 +50,18 @@ def construct_message(agents, idx, person, final=False):
 
   if final:
     prefix_string = prefix_string + "\n\n Closely examine your biography and the biography of other agents and provide an updated bullet point biography.".format(
-        person, person
-    )
+        person, person)
   else:
     prefix_string = prefix_string + "\n\n Using these other biographies of {} as additional advice, what is your updated bullet point biography of the computer scientist {}?".format(
-        person, person
-    )
+        person, person)
 
   return {"role": "user", "content": prefix_string}
 
 
 def main(cfg, **kw):
+  global generate_answer
+  assert generate_answer
+
   path = Path(__file__).parent / "article.json"
   with open(path, "r") as f:
     # name -> biography
@@ -76,17 +76,14 @@ def main(cfg, **kw):
   n = 2 if cfg.dbg else 40
 
   for person in tqdm(people[:n]):
-    agent_contexts = [
-        [
-            {
-                "role":
-                    "user",
-                "content":
-                    "Give a bullet point biography of {} highlighting their contributions and achievements as a computer scientist, with each fact separated with a new line character. "
-                    .format(person)
-            }
-        ] for agent in range(cfg.agents)
-    ]
+    agent_contexts = [[{
+        "role":
+            "user",
+        "content":
+            f"Give a bullet point biography of {person} highlighting "
+            "their contributions and achievements as a computer scientist, "
+            "with each fact separated with a new line character."
+    }] for agent in range(cfg.agents)]
 
     for round in range(cfg.rounds):
       for i, agent_context in enumerate(agent_contexts):
@@ -96,12 +93,10 @@ def main(cfg, **kw):
 
           if round == (cfg.rounds - 1):
             message = construct_message(
-                agent_contexts_other, 2 * round - 1, person=person, final=True
-            )
+                agent_contexts_other, 2 * round - 1, person=person, final=True)
           else:
             message = construct_message(
-                agent_contexts_other, 2 * round - 1, person=person, final=False
-            )
+                agent_contexts_other, 2 * round - 1, person=person, final=False)
           agent_context.append(message)
 
         completion = generate_answer(agent_context)
@@ -117,4 +112,4 @@ def main(cfg, **kw):
     generated_description[person] = agent_contexts
 
   from tk.debate import utils
-  utils.save(cfg, dbg, generated_description, "biography")
+  utils.save(cfg, generated_description)

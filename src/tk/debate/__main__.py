@@ -2,6 +2,7 @@
 
     $ python -m tk.debate --c.dbg=False
 """
+import tk
 import dataclasses as dc
 import importlib
 import pkgutil
@@ -14,6 +15,15 @@ from ml_collections import config_flags
 from tk.debate import utils as dutil
 from tk.utils import cli, pprint, utils
 from tk.utils.log import L
+import warnings
+
+warnings.filterwarnings(
+    "ignore", message="Starting from v4.46,.*",
+)
+warnings.filterwarnings(
+    "ignore",
+    message="You seem to be using the pipelines sequentially on GPU.*",
+)
 
 CFG = config_flags.DEFINE_config_file(
     "c", str(Path(__file__).parent / "configs/main.py"),
@@ -31,19 +41,21 @@ def find_module_with_prefix(package, prefix, task):
 
 def main(argv):
   cfg = CFG.value
+  L.add(dutil._mkpath(cfg))
   L.info(f"{cfg=}")
+
   utils.post_mortem_debug()
+  utils.seed_all(cfg.seed)
 
   do_gen = True
   if data := dutil.load(cfg):
     L.error("found result, not proceeding with generation. delete.")
     do_gen = False
 
-  # if cfg.task == "plot":
-  #     from tk.debate.math import plot
-  #     return plot.main(cfg, data)
-
-  dutil.generate_answer = dutil.LocalModel(cfg.model)
+  # dutil.generate_answer = tk.utils.memo(
+  #     dutil.LocalModel(cfg.model).__call__, seed=cfg.seed
+  # )
+  dutil.generate_answer = dutil.LocalModel(cfg.model, cached=True)
 
   try:
     package = importlib.import_module(f'tk.debate.{cfg.task}')
