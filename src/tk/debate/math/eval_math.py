@@ -1,8 +1,8 @@
 from pathlib import Path
+
+from tk.debate.math.plot import (plot_accuracy_progression,
+                                 plot_agent_agreement, plot_agent_answers)
 from tk.debate.utils import load
-from tk.debate.math.plot import (
-    plot_accuracy_progression, plot_agent_answers, plot_agent_agreement
-)
 
 
 def main(cfg, **kw):

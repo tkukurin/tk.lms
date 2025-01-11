@@ -2,18 +2,18 @@
 
     $ python -m tk.debate --c.dbg=False
 """
-import subprocess
 import dataclasses as dc
+import importlib
+import pkgutil
+import subprocess
 from pathlib import Path
 
 from absl import app
-from tk.utils import cli, pprint, utils
-
-from tk.utils.log import L
-import pkgutil
-import importlib
 from ml_collections import config_flags
+
 from tk.debate import utils as dutil
+from tk.utils import cli, pprint, utils
+from tk.utils.log import L
 
 CFG = config_flags.DEFINE_config_file(
     "c", str(Path(__file__).parent / "configs/main.py"),

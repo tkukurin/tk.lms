@@ -1,27 +1,30 @@
 from __future__ import annotations
 
+import json
+import re
+import threading
+import time
+from collections import namedtuple
+from pathlib import Path
+from types import SimpleNamespace as nspc
+from typing import NamedTuple
+
+import openai.types.chat.chat_completion as oai_types
 import torch
+from ml_collections import ConfigDict
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from tk.utils.log import L
+
 # from transformers.generation import (
 #     LogitsProcessorList, TopPLogitsWarper, TemperatureLogitsWarper
 # )
 
-from collections import namedtuple
-import json
-from pathlib import Path
-import threading
-from typing import NamedTuple
-from transformers import AutoTokenizer, AutoModelForCausalLM
 
-import time
 
-from tk.utils.log import L
 
-import openai.types.chat.chat_completion as oai_types
 
-from ml_collections import ConfigDict
-from types import SimpleNamespace as nspc
 
-import re
 
 Turn = namedtuple("Turn", ["role", "content"])
 
@@ -42,8 +45,8 @@ import tk
 
 _BASE = tk.datadir / "debate"
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def combine_figures(figs, save_path=None, grid_size=None):
