@@ -34,6 +34,7 @@ from tk.rpe.tasks.regular import cycle_navigation
 from tk.rpe.tasks.regular import even_pairs
 from tk.rpe.tasks.regular import modular_arithmetic
 from tk.rpe.tasks.regular import parity_check
+from tk.rpe.tasks.custom import dependencies
 
 
 MODEL_BUILDERS = {
@@ -51,6 +52,7 @@ CURRICULUM_BUILDERS = {
 }
 
 TASK_BUILDERS = {
+    'twoval': dependencies.TwoValCopy,
     'even_pairs': even_pairs.EvenPairs,
     'modular_arithmetic': functools.partial(
         modular_arithmetic.ModularArithmetic, modulus=5
