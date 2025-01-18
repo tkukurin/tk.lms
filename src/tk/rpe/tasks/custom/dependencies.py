@@ -47,7 +47,7 @@ Example train dynamics
 {'length': 27, 'accuracy': np.float64(0.12666377425193787)}
 """
 
-from rpe.tasks import task
+from tk.rpe.tasks import task
 # %%
 import dataclasses as dc
 from typing import *
