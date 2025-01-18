@@ -2,14 +2,14 @@
 """
 
 from ml_collections import config_dict
-from ml_collections import config_flags
 from tk.rpe.models.positional_encodings import PositionalEncodings as PE
 
 
-def get_config(
-    positional_encodings: str = 'NOISY_RELATIVE',
-):
-  """Get the default configuration."""
+def get_config():
+  """Get the default configuration.
+
+  Should fit into 16G gpu such as T4.
+  """
   config = config_dict.ConfigDict()
   
   # Training parameters
@@ -19,7 +19,7 @@ def get_config(
   config.model = 'transformer_encoder'
   config.is_autoregressive = False
   config.computation_steps_mult = 0
-  config.training_steps = 10_000
+  config.training_steps = 1_000
   
   # Architecture parameters
   config.arch = config_dict.ConfigDict()
@@ -27,11 +27,12 @@ def get_config(
   config.arch.embedding_dim = 64
   config.arch.dropout_prob = 0.1
 
-  pe = PE.from_string(positional_encodings)
-  config.arch.positional_encodings = str(positional_encodings)
-  if pe in (PE.NOISY_LEARNT, ):
+  config.arch.positional_encodings = 'NOISY_RELATIVE'
+  # idk ml collections can't give dict as params :'(
+  if config.arch.positional_encodings.startswith("NOISY"):
     config.arch.positional_encodings_params = ({
         'noise_max_length': 2048,
-    }).items()
+    })
   
   return config
+

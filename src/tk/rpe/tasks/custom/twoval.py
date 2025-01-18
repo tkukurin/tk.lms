@@ -1,6 +1,12 @@
 """Custom generalization task with n-way dependencies.
 
-Example train dynamics (default config but sequence <=16 toks, 2 it/s on T4):
+Example train dynamics 
+* sin/cos embeds
+* sequence <=19 toks
+* 2 it/s on T4
+
+---
+
 {'step': 0, 'train_loss': 3.717655897140503, 'train_accuracy': 0.013822115957736969}
 {'step': 100, 'train_loss': 2.959900140762329, 'train_accuracy': 0.0703125}
 {'step': 200, 'train_loss': 2.7089343070983887, 'train_accuracy': 0.1647135466337204}
