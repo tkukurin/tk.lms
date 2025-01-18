@@ -75,6 +75,8 @@ if main := (__name__ == "__main__"):
 
 
 def interpret_toks(toks: list[str], positions: dict[str, list[int]]) -> dict[int, int]:
+    """Default interpret the multi-dependency case.
+    """
     state: list[int] = [1]
     is_start: bool = False
     outputs: dict[int, int] = {}
@@ -87,11 +89,11 @@ def interpret_toks(toks: list[str], positions: dict[str, list[int]]) -> dict[int
         elif i in positions['muls'] and is_start:
             state.append(int(tok))
         elif i in positions['nums']:
-            outputs[i] = int(tok) * state[-1]
+            outputs[i] = str((int(tok) * state[-1]) % 1000)
     return outputs
 
 
-def find_special(toks: list[str], special: dict[str, Collection[str]]) -> dict[str, Sequence[int]]:
+def find_special(toks: list[str], special: dict[str, Collection[str]]) -> dict[str, list[int]]:
     out = {}
     for i, tok in enumerate(toks):
         for k, vs in special.items():
@@ -101,19 +103,19 @@ def find_special(toks: list[str], special: dict[str, Collection[str]]) -> dict[s
 
 
 assert( find_special(
-    ['1', 'a', 'start', '100', 'b', '2', '200', '5', 'stop', '100', '5'],
-    {'starts': ['start'], 'stops': ['stop'], 'muls': {'100', '200'}, 'nums': set(map(str, range(10)))},
+    ['1', 'a', '<<', '100', 'b', '2', '200', '5', '>>', '100', '5'],
+    {'starts': ['<<'], 'stops': ['>>'], 'muls': {'100', '200'}, 'nums': set(map(str, range(10)))},
 )) == {'starts': [2], 'stops': [8], 'muls': [3, 6, 9], 'nums': [0, 5, 7, 10]}
 assert interpret_toks(
-    ['1', 'a', 'start', '100', 'b', '2', '200', '5', 'stop', '100', '5'],
+    ['1', 'a', '<<', '100', 'b', '2', '200', '5', '>>', '100', '5'],
     {'starts': [2], 'stops': [8], 'muls': [3, 6, 9], 'nums': [0, 5, 7, 10]}
-) == {5: 200, 7: 1000, 10: 5, 0: 1}
+) == {k: str(v) for k, v in ({5: 200, 7: 0, 10: 5, 0: 1}).items()}
 # %%
 
 @dc.dataclass
 class Voc:
-    kind: TokTypes
-    t2i: dict
+    kind: TokTypes = dc.field(repr=False)
+    t2i: dict = dc.field(repr=True)
     __getitem__ = lambda self, key: self.t2i[key]
     __len__ = lambda self: len(self.t2i)
     get = lambda self, key: self.t2i.get(key)
@@ -123,18 +125,16 @@ def mkvocab(
     *,
     nums = tuple('0123456789'),
     chrs = tuple('abcdefghij'), #klmnopqrstuvwxyz')
-    muls = ('100', ),
+    muls = tuple(map(str, range(0, 1000, 100))),
     **adds,
 ):
-    kind = dict(
-        muls=muls,
-        chrs=chrs,
-        nums=nums,
-        **adds
-    )
-    # verify TokTypes keys <= 
-    print(TokTypes.__annotations__)
-    assert set(kind) <= set(TokTypes.__annotations__), set(kind)
+    ks = set(TokTypes.__annotations__)
+    kind = {
+        **{k: [] for k in ks},
+        **dict(muls=muls, chrs=chrs, nums=nums),
+        **adds,
+    }
+    assert set(kind) <= ks, set(kind)
     vocab = it.chain(nums, muls, chrs, *adds.values())
     vocab = {v: i for i, v in enumerate(vocab)}
     return Voc(kind, vocab)
@@ -163,18 +163,18 @@ def generate_multi_dependency_string(
             {'start': [2], 'stop': [8], 'mul': [3, 6, 9], 'num': [5, 7, 10]}
         ) == {5: 200, 7: 1000, 10: 5}
     """
-    ndeps_all = min(
-        min(4, n // ndeps) * ndeps,
-        rng.randint(0, n),
-    )
+    if 0 == (ndeps_all := min(4, n // ndeps) * ndeps):
+        ndeps_all = rng.randint(0, n)
     positions = rng.sample(range(n), k=ndeps_all)
     toks = rng.choices(vocab.kind['chrs'], k=n)
-    pos_out = ('starts', 'stops', 'muls', 'nums')
+    pos_out = ['starts', 'stops', 'muls', 'nums']
+    rng.shuffle(pos_out)
     outs = {k: [] for k in pos_out}
-    for i, kind in enumerate(rng.choices(pos_out, k=len(pos_out))):
+    for i, kind in enumerate(pos_out):
         outs[kind] = positions[i * ndeps: (i + 1) * ndeps]
-        for ix in outs[kind]:
-            toks[ix] = rng.choice(vocab.kind[kind])
+        if opts := vocab.kind[kind]:
+            for ix in outs[kind]:
+                toks[ix] = rng.choice(opts)
     outputs = interpret_toks(toks, outs)
     return toks, outputs
 
@@ -182,41 +182,53 @@ if main: print(mkvocab())
 # %%
 from jax import nn as jnn
 
-def encode(toks, outputs, vocab, input_size=None, output_size=None):
-    input_size = input_size or len(vocab)
-    output_size = output_size or len(vocab)
+def encode(
+    toks: list, ix2out: dict, vocab: dict,
+    input_size=None, output_size=None
+):
+    """encode: identity for token or multiply
+    """
+    inps = [vocab[t] for t in toks]
+    outs = [vocab[ix2out.get(i, t)] for i, t in enumerate(toks)]
     batch = {
-        'input': jnn.one_hot(
-            jnp.array([vocab[tok] for tok in toks]),
-            input_size),
-        'output': jnn.one_hot(
-            jnp.array([vocab[outputs.get(t, t)] for t in toks]),
-            output_size),
+        'input': jnn.one_hot(jnp.array(inps), input_size or len(vocab)),
+        'output': jnn.one_hot(jnp.array(outs), output_size or len(vocab)),
     }
+    if not hasattr(encode, "logged"):
+        setattr(encode, "logged", True)
+        logval = list(zip(enumerate(toks), inps, outs))
+        print(f"===\nENCODE:\n{vocab=}\n{ix2out=}\n{logval}")
     return batch
 
 
 if main:
-    t, o, v = generate_multi_dependency_string(
-        random.Random(42), 32, (v := mkvocab())
+    t, o = generate_multi_dependency_string(
+        random.Random(42), 64, 5, (
+            v := mkvocab(
+                starts=("<<", "[["), 
+                stops=(">>", "]]")))
     )
+    print(t)
     print(o)
-    print(encode(t, o, v))
+    batch = encode(t, o, v)
+    print(batch['output'])
+    print(jnp.argmax(batch['output'], axis=-1))
+    print(jnp.sum(batch['output'], axis=-1))
 
 # %%
 
 
-class TwoValCopy(task.GeneralizationTask):
-    """Task where we rely on exactly two values.
-    """
+class MultiTokenDep(task.GeneralizationTask):
+    """Task where we rely on multi-token interactions."""
+
     def __init__(self):
         super().__init__()
         self.nstart = 2
         self.nstop = 2
         self.ndeps = 3
         self.vocab = mkvocab(
-            starts=[f'<start{i}>' for i in range(self.nstart)], 
-            stops=[f'<stop{i}>' for i in range(self.nstop)]
+            starts=[f'<s{i}>' for i in range(self.nstart)], 
+            stops=[f'</s{i}>' for i in range(self.nstop)]
         )
         self.vocab_size = len(self.vocab)
 
