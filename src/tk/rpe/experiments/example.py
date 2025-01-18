@@ -1,22 +1,7 @@
-# Copyright 2024 DeepMind Technologies Limited
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-
 """Example script to train and evaluate a network."""
 
+from pathlib import Path
 from absl import app
-from absl import flags
 import haiku as hk
 import jax.numpy as jnp
 import numpy as np
@@ -25,78 +10,43 @@ from tk.rpe.experiments import constants
 from tk.rpe.experiments import curriculum as curriculum_lib
 from tk.rpe.experiments import training
 from tk.rpe.experiments import utils
+from ml_collections import config_flags
+from tk.utils.utils import post_mortem_debug
 
-
-_BATCH_SIZE = flags.DEFINE_integer(
-    'batch_size',
-    default=128,
-    help='Training batch size.',
-    lower_bound=1,
-)
-_SEQUENCE_LENGTH = flags.DEFINE_integer(
-    'sequence_length',
-    default=40,
-    help='Maximum training sequence length.',
-    lower_bound=1,
-)
-_TASK = flags.DEFINE_string(
-    'task',
-    default='missing_duplicate_string',
-    help='Length generalization task (see `constants.py` for other tasks).',
-)
-_ARCHITECTURE = flags.DEFINE_string(
-    'architecture',
-    default='transformer_encoder',
-    help='Model architecture (see `constants.py` for other architectures).',
-)
-_IS_AUTOREGRESSIVE = flags.DEFINE_boolean(
-    'is_autoregressive',
-    default=False,
-    help='Whether to use autoregressive sampling or not.',
-)
-_COMPUTATION_STEPS_MULT = flags.DEFINE_integer(
-    'computation_steps_mult',
-    default=0,
-    help=(
-        'The amount of computation tokens to append to the input tape (defined'
-        ' as a multiple of the input length)'
-    ),
-    lower_bound=0,
-)
-# The architecture parameters depend on the architecture, so we cannot define
-# them as via flags. See `constants.py` for the required values.
-_ARCHITECTURE_PARAMS = {
-    'num_layers': 5,
-    'embedding_dim': 64,
-    'dropout_prob': 0.1,
-    'positional_encodings': 'NOISY_RELATIVE',
-    'positional_encodings_params': {'noise_max_length': 2048},
-}
+_CFG = config_flags.DEFINE_config_file(
+  'c', 
+  str(Path(__file__).parent / 'config.py'),
+  'Path to the configuration file.')
 
 
 def main(_) -> None:
-  # Create the task.
+  post_mortem_debug()
+
+  cfg = _CFG.value
+  params = cfg.arch
+
   curriculum = curriculum_lib.UniformCurriculum(
-      values=list(range(1, _SEQUENCE_LENGTH.value + 1))
+      values=list(range(1, cfg.sequence_length + 1))
   )
-  task = constants.TASK_BUILDERS[_TASK.value]()
+  task = constants.TASK_BUILDERS[cfg.task]()
 
   # Create the model.
   single_output = task.output_length(10) == 1
-  model = constants.MODEL_BUILDERS[_ARCHITECTURE.value](
+  print(params)
+  model = constants.MODEL_BUILDERS[cfg.model](
       output_size=task.output_size,
       return_all_outputs=True,
-      **_ARCHITECTURE_PARAMS,
+      **params,
   )
-  if _IS_AUTOREGRESSIVE.value:
-    if 'transformer' not in _ARCHITECTURE.value:
+  if cfg.is_autoregressive:
+    if 'transformer' not in cfg.model:
       model = utils.make_model_with_targets_as_input(
-          model, _COMPUTATION_STEPS_MULT.value
+          model, cfg.computation_steps_mult
       )
     model = utils.add_sampling_to_autoregressive_model(model, single_output)
   else:
     model = utils.make_model_with_empty_targets(
-        model, task, _COMPUTATION_STEPS_MULT.value, single_output
+        model, task, cfg.computation_steps_mult, single_output
     )
   model = hk.transform(model)
 
@@ -113,10 +63,10 @@ def main(_) -> None:
   training_params = training.ClassicTrainingParams(
       seed=0,
       model_init_seed=0,
-      training_steps=10_000,
+      training_steps=cfg.training_steps,
       log_frequency=100,
       length_curriculum=curriculum,
-      batch_size=_BATCH_SIZE.value,
+      batch_size=cfg.batch_size,
       task=task,
       model=model,
       loss_fn=loss_fn,
@@ -127,7 +77,7 @@ def main(_) -> None:
       max_range_test_length=100,
       range_test_total_batch_size=512,
       range_test_sub_batch_size=64,
-      is_autoregressive=_IS_AUTOREGRESSIVE.value,
+      is_autoregressive=cfg.is_autoregressive,
   )
 
   training_worker = training.TrainingWorker(training_params, use_tqdm=True)
@@ -135,7 +85,7 @@ def main(_) -> None:
 
   # Gather results and print final score.
   accuracies = [r['accuracy'] for r in eval_results]
-  score = np.mean(accuracies[_SEQUENCE_LENGTH.value + 1 :])
+  score = np.mean(accuracies[cfg.sequence_length + 1 :])
   print(f'Score: {score}')
 
 
