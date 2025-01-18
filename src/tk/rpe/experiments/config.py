@@ -5,7 +5,7 @@ from ml_collections import config_dict
 from tk.rpe.models.positional_encodings import PositionalEncodings as PE
 
 
-def get_config():
+def get_config(positional_encodings: str = 'NOISY_RELATIVE') -> config_dict.ConfigDict:
   """Get the default configuration.
 
   Should fit into 16G gpu such as T4.
@@ -27,7 +27,7 @@ def get_config():
   config.arch.embedding_dim = 64
   config.arch.dropout_prob = 0.1
 
-  config.arch.positional_encodings = 'NOISY_RELATIVE'
+  config.arch.positional_encodings = positional_encodings
   # idk ml collections can't give dict as params :'(
   if config.arch.positional_encodings.startswith("NOISY"):
     config.arch.positional_encodings_params = ({
