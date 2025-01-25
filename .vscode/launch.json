@@ -56,7 +56,8 @@
             "request": "launch",
             "module": "tk.expt.run",
             "args": [
-                "--config", "src/tk/arc/baseline.py",
+                "--config",
+                "${input:jaxCfg}",
                 "--logtostderr",
                 "--jaxline_mode", 
                 "train_eval_multithreaded",
@@ -79,7 +80,8 @@
             "request": "launch",
             "module": "tk.expt.run",
             "args": [
-                "--config", "src/tk/arc/baseline.py",
+                "--config",
+                "${input:jaxCfg}",
                 "--logtostderr",
                 "--jaxline_mode", 
                 "train_eval_multithreaded",
@@ -177,6 +179,17 @@
             "options": [
                 "0807_1941",
                 "0807_2117",
+            ]
+        },
+        {
+            "id": "jaxCfg",
+            "description": "Which config to use for training.",
+            "type": "pickString",
+            "default": 
+                "src/tk/rpe/experiments/jaxline/baseline.py",
+            "options": [
+                "src/tk/arc/baseline.py",
+                "src/tk/rpe/experiments/jaxline/baseline.py",
             ]
         }
     ],
