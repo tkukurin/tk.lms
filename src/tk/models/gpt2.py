@@ -145,7 +145,9 @@ class GPT(nn.Module):
                 dtype=self.config.dtype, 
                 name=f'out{i}')(y)
             ys.append(y)
-        return logits, jnp.vstack(ys)
+        if self.config.output_head:
+            return logits, jnp.vstack(ys)
+        return logits
 
     # def init(self, rng):
     #     """
