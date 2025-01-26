@@ -72,12 +72,24 @@ def parse(s: str, **kwargs) -> CFG:
   start = None
   def _parse_rhs(rhs: str) -> list[Rhs]:
     #return [Rhs(x, 'nt' if x.isupper() else 't') for x in rhs.split()]
-    # NOTE(tk) this _will_ cause issue if tok contains |, e.g. <|tok|>
-    parts = it.chain(*[x.split("|") for x in rhs.split()])
-    return list(parts)
+    stack = []
+    out = []
+    for x in rhs.split():
+      if "|" in x: # NOTE(tk) issue if tok contains |, e.g. <|tok|>
+        stack.append([])
+        stack[-1].extend(x.split("|"))
+      else:
+        stack.append([x])
+    for x in it.product(*stack):
+      out.append(x)
+      # out.append(Rhs("".join(x), 'nt' if x[0].isupper() else 't'))
+    return out
+    
 
   for line in lines:
-    if not line.strip():
+    if not (line := line.strip()):
+      continue
+    if line.startswith("#"):
       continue
     lhs, rhs = line.split('->')
     lhs = lhs.strip()
@@ -85,7 +97,8 @@ def parse(s: str, **kwargs) -> CFG:
     if start is None:
       start = lhs
     non_terminals.add(lhs)
-    rules.append(Rule(lhs, _parse_rhs(rhs)))
+    for rhs in _parse_rhs(rhs):
+      rules.append(Rule(lhs, rhs))
     for symbol in rules[-1].rhs:
       # if symbol.kind == 't':
       if not symbol.isupper():
@@ -112,13 +125,13 @@ def test_parse():
   assert _s(cfg.terminals) == {'the', 'cat', 'dog', 'chased'}
   assert _s(cfg.non_terminals) == {'S', 'NP', 'VP', 'DET', 'N', 'V'}
   assert len(cfg.rules) == 7
-  assert Rule('S', ['NP', 'VP']) in cfg.rules
-  assert Rule('NP', ['DET', 'N']) in cfg.rules
-  assert Rule('VP', ['V', 'NP']) in cfg.rules
-  assert Rule('DET', ['the']) in cfg.rules
-  assert Rule('N', ['cat']) in cfg.rules
-  assert Rule('N', ['dog']) in cfg.rules
-  assert Rule('V', ['chased']) in cfg.rules
+  assert Rule('S', ('NP', 'VP', )) in cfg.rules
+  assert Rule('NP', ('DET', 'N', )) in cfg.rules
+  assert Rule('VP', ('V', 'NP', )) in cfg.rules
+  assert Rule('DET', ('the', )) in cfg.rules
+  assert Rule('N', ('cat', )) in cfg.rules
+  assert Rule('N', ('dog', )) in cfg.rules
+  assert Rule('V', ('chased', )) in cfg.rules
   print("PASS: test_parse")
 
 
