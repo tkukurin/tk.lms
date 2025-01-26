@@ -1,10 +1,12 @@
 """Quick CFG parser and generator.
-"""
 
+TODO check, LLM-generated.
+"""
+# %%
+import numpy as np
 from dataclasses import dataclass
 from collections import namedtuple
 from typing import List, Dict, Set, Optional
-import random
 
 Rule = namedtuple('Rule', ['lhs', 'rhs'])
 
@@ -37,17 +39,6 @@ def parse(s: str) -> CFG:
           V -> chased
           '''
       >>> cfg = parse(grammar_str)
-      >>> assert cfg.start == 'S'
-      >>> assert cfg.terminals == {'the', 'cat', 'dog', 'chased'}
-      >>> assert cfg.non_terminals == {'S', 'NP', 'VP', 'Det', 'N', 'V'}
-      >>> assert len(cfg.rules) == 6
-      >>> assert Rule('S', ['NP', 'VP']) in cfg.rules
-      >>> assert Rule('NP', ['Det', 'N']) in cfg.rules
-      >>> assert Rule('VP', ['V', 'NP']) in cfg.rules
-      >>> assert Rule('Det', ['the']) in cfg.rules
-      >>> assert Rule('N', ['cat']) in cfg.rules
-      >>> assert Rule('N', ['dog']) in cfg.rules
-      >>> assert Rule('V', ['chased']) in cfg.rules
   """
   lines = s.strip().split('\n')
   terminals = set()
@@ -97,9 +88,7 @@ def test_parse():
   print("PASS: test_parse")
 
 
-def interpret(s: str, cfg: CFG) -> Optional[Tree]:
-  tokens = s.split()
-
+def interpret(tokens: list[str], cfg: CFG) -> Optional[Tree]:
   def build_tree(symbol: str, pos: int) -> tuple[Optional[Tree], int]:
     if symbol in cfg.terminals:
       if pos < len(tokens) and tokens[pos] == symbol:
@@ -132,22 +121,21 @@ def interpret(s: str, cfg: CFG) -> Optional[Tree]:
   return None
 
 
-def generate(cfg: CFG) -> str:
-
-  def expand(symbol: str) -> List[str]:
+def generate(
+  cfg: CFG,
+  gen: np.random.Generator = np.random.default_rng()
+) -> list[str]:
+  def expand(symbol: str) -> list[str]:
     if symbol in cfg.terminals:
       return [symbol]
-
     matching_rules = [r for r in cfg.rules if r.lhs == symbol]
-    chosen_rule = random.choice(matching_rules)
-
+    chosen_rule = matching_rules[gen.integers(0, len(matching_rules))]
     result = []
     for sym in chosen_rule.rhs:
       result.extend(expand(sym))
-
     return result
 
-  return ' '.join(expand(cfg.start))
+  return expand(cfg.start)
 
 
 def test_generate():
@@ -189,7 +177,8 @@ def test_interpret():
   ]
 
   for test in test_cases:
-    tree = interpret(test, cfg)
+    toks = test.split()
+    tree = interpret(toks, cfg)
     print(f"Input: {test}")
     print(f"Valid: {tree is not None}")
 
@@ -197,5 +186,6 @@ def test_interpret():
 if __name__ == "__main__":
   test_parse()
   test_generate()
-  print("\nTesting interpreter:")
   test_interpret()
+
+# %%
