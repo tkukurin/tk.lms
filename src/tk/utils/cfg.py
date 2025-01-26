@@ -9,9 +9,30 @@ At some point migrate to e.g. [lark]
 import numpy as np
 from dataclasses import dataclass
 from collections import namedtuple
-from typing import List, Dict, Set, Optional
+from typing import List, Dict, Literal, Set, Optional, NamedTuple
+import re
+import itertools as it
 
 Rule = namedtuple('Rule', ['lhs', 'rhs'])
+
+import dataclasses as dc
+
+
+@dc.dataclass(frozen=True, unsafe_hash=True)
+class Rhs:  # unused WIP
+  symbol: str
+  kind: Literal['t', 'nt']
+  params: tuple[int] = dc.field(default_factory=tuple)
+  __str__ = lambda s: str(s.symbol)
+  @classmethod
+  def fromstr(cls, s: str):
+    # parse xx@@VARS[x] using re.match
+    parts = re.match(r'(\w+)(@@(\w+\[\d+\]))?', s)
+    if not parts:
+      raise ValueError(f"Invalid Rhs: {s}")
+    s, _, params = parts.groups()
+    kind = 't' if s.isupper() else 'nt'
+    return cls(s, kind, params or tuple())
 
 
 @dataclass
@@ -29,7 +50,7 @@ class CFG:
   limit: int | None = None
 
 
-def parse(s: str) -> CFG:
+def parse(s: str, **kwargs) -> CFG:
   """CFG from string
 
   Example:
@@ -49,6 +70,12 @@ def parse(s: str) -> CFG:
   non_terminals = set()
   rules = []
   start = None
+  def _parse_rhs(rhs: str) -> list[Rhs]:
+    #return [Rhs(x, 'nt' if x.isupper() else 't') for x in rhs.split()]
+    # NOTE(tk) this _will_ cause issue if tok contains |, e.g. <|tok|>
+    parts = it.chain(*[x.split("|") for x in rhs.split()])
+    return list(parts)
+
   for line in lines:
     if not line.strip():
       continue
@@ -58,13 +85,14 @@ def parse(s: str) -> CFG:
     if start is None:
       start = lhs
     non_terminals.add(lhs)
-    rules.append(Rule(lhs, rhs.split()))
-    for symbol in rhs.split():
+    rules.append(Rule(lhs, _parse_rhs(rhs)))
+    for symbol in rules[-1].rhs:
+      # if symbol.kind == 't':
       if not symbol.isupper():
         terminals.add(symbol)
       else:
         non_terminals.add(symbol)
-  return CFG(terminals, non_terminals, rules, start or "S")
+  return CFG(terminals, non_terminals, rules, start or "S", **kwargs)
 
 
 def test_parse():
@@ -80,8 +108,9 @@ def test_parse():
   cfg = parse(grammar_str)
   print(cfg)
   assert cfg.start == 'S'
-  assert cfg.terminals == {'the', 'cat', 'dog', 'chased'}
-  assert cfg.non_terminals == {'S', 'NP', 'VP', 'DET', 'N', 'V'}
+  _s = lambda xs: {str(x) for x in xs}
+  assert _s(cfg.terminals) == {'the', 'cat', 'dog', 'chased'}
+  assert _s(cfg.non_terminals) == {'S', 'NP', 'VP', 'DET', 'N', 'V'}
   assert len(cfg.rules) == 7
   assert Rule('S', ['NP', 'VP']) in cfg.rules
   assert Rule('NP', ['DET', 'N']) in cfg.rules
@@ -135,21 +164,16 @@ def generate(
   
   while stack:
     symbol, is_expanded = stack.pop()
-    
     if is_expanded:
       result.append(symbol)
       continue
-      
     if symbol in cfg.terminals:
       result.append(symbol)
       continue
-      
     matching_rules = [r for r in cfg.rules if r.lhs == symbol]
     while True:
       chosen_rule = matching_rules[gen.integers(0, len(matching_rules))]
       temp_stack = [(s, False) for s in reversed(chosen_rule.rhs)]
-      
-      # Check length limit
       temp_result = len(result)
       for s, _ in temp_stack:
         if s in cfg.terminals:
