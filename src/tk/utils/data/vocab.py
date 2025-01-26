@@ -55,6 +55,23 @@ _TEST_GRAMMAR = """
     V -> chased
     """
 
+_TURTLE_GRAMMAR = """
+    S -> <s> S0 I </s>
+    S0 -> ( N , N ) C <instr>
+    I -> I I
+    I -> M
+    M -> up N
+    M -> down N
+    M -> color C
+    N -> 1
+    N -> 2
+    N -> 3
+    C -> reset
+    C -> red
+    C -> blue
+    C -> green
+"""
+
 from tk.utils import cfg as clib
 
 def mockgen_cfg(
@@ -64,16 +81,23 @@ def mockgen_cfg(
 ):
     cfg = clib.parse(grammar)
     voc = Voc.make({
-        'terminals': cfg.terminals,
+        'terminals': list(cfg.terminals),
+        # TODO this is specifically for turtle
+        'nums': list('0123456789'),
         'special': ['<s>', '</s>', '<pad>'],
     })
+    voc.limit = seqlen
     assert ('</s>' in voc and '<pad>' in voc), (
         f'expecting </s> and <pad>: {voc}'
     )
     pad = voc['<pad>']
     end = voc['</s>']
     def nxt():
-        seq = clib.generate(cfg, gen)
+        nfail = 0
+        while len(seq := clib.generate(cfg, gen)) > (seqlen or 99999):
+            nfail += 1
+            if nfail > 128:  # TODO specifically for turtle, use proper cfg
+                raise ValueError(f"failed to generate ({nfail=})")
         seq = [voc[x] for x in seq]
         closer = seq.index(end)
         seq = seq[:closer + 1]
@@ -82,6 +106,66 @@ def mockgen_cfg(
         mask = [1] * (closer + 1) + [0] * (len(seq) - (closer + 1))
         return seq, mask
     return voc, nxt
+
+
+def mockgen_turtle(
+    gen: np.random.Generator = np.random.default_rng(),
+    seqlen: int | None = None
+):
+    """Install Lark for this.
+
+    [example]: https://github.com/lark-parser/lark/blob/master/examples/turtle_dsl.py
+    """
+    import lark
+    turtle_grammar = """
+        start: "<s>" instruction+ "</s>"
+
+        instruction: MOVEMENT NUMBER            -> movement
+                | "c" COLOR [COLOR]          -> change_color
+                | "fill" code_block          -> fill
+                | "repeat" NUMBER code_block -> repeat
+
+        code_block: "{" instruction+ "}"
+
+        MOVEMENT: "f"|"b"|"l"|"r"
+        COLOR: LETTER+
+
+        %import common.LETTER
+        %import common.INT -> NUMBER
+        %import common.WS
+        %ignore WS
+    """
+    parser = lark.Lark(turtle_grammar)
+    return parser
+
+
+
+def turtle_interpret(xs: list[str]):
+    xs = xs[xs.index('<s>') + 1:xs.index('</s>')]
+    # ( 1 , 2 ) red <instr>
+    state = state0 = int(xs[1]), int(xs[3]), xs[5]
+    xstate = None
+    ops = ('up', 'down', 'left', 'right', 'color')
+    # mod = max(int(x) for x in xs if x.isdigit()) + 1
+    # random choice -> test when char is never in input
+    mod = 8
+    traces = []
+    for i, x in enumerate(xs[xs.index('<instr>') + 1:]):
+        if xstate in ops:
+            a, b, c = state
+            ud = xstate in ('up', 'down')
+            lr = xstate in ('left', 'right')
+            p = int(x) if ud or lr else 0
+            da, db = (p if ud else 0, p if lr else 0)
+            if xstate in ('color', ):
+                c = state0[-1] if x == 'reset' else x
+            state = ((a + da) % mod, (b + db) % mod, c)
+            traces.append((xstate, p, state))
+            xstate = None
+        else:
+            assert x in ops, f"{x=}, {xs=}"
+            xstate = x
+    return state0, state, traces
 
 
 def mockgen(
@@ -113,12 +197,33 @@ def mockgen(
 
 
 if __name__ == '__main__':
-    voc, nxt = mockgen_cfg(_TEST_GRAMMAR, seqlen=10)
+    voc, nxt = mockgen_cfg(_TURTLE_GRAMMAR, seqlen=16)
     print(voc)
     toks, mask = nxt()
-    print([
+    tokstr = ([
         voc.inverse()[tok] for tok in toks
     ])
+    print(tokstr)
+    print(turtle_interpret(tokstr))
     print(mask)
+    print(len(voc), voc.values())
     assert len(mask) == len(toks)
+# %%
+if __name__ == '__main__':
+    for _ in range(50):
+        voc, nxt = mockgen_cfg(_TURTLE_GRAMMAR, seqlen=16)
+        print(voc)
+        toks, mask = nxt()
+        tokstr = ([
+            voc.inverse()[tok] for tok in toks
+        ])
+        print(tokstr)
+        print(turtle_interpret(tokstr))
+        print(mask)
+        assert len(mask) == len(toks)
+# %%
+# if __name__ == '__main__':
+#     p = mockgen_turtle(seqlen=16)
+#     print(p.rules)
+#     print(p.grammar.rule_defs)
 # %%
