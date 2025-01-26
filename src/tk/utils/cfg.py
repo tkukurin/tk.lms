@@ -1,6 +1,9 @@
 """Quick CFG parser and generator.
 
 TODO check, LLM-generated.
+At some point migrate to e.g. [lark]
+
+[lark]: https://github.com/lark-parser/lark
 """
 # %%
 import numpy as np
@@ -23,6 +26,7 @@ class CFG:
   non_terminals: Set[str]
   rules: list[Rule]
   start: str
+  limit: int | None = None
 
 
 def parse(s: str) -> CFG:
@@ -31,9 +35,9 @@ def parse(s: str) -> CFG:
   Example:
       >>> grammar_str = '''
           S -> NP VP
-          NP -> Det N
+          NP -> DET N
           VP -> V NP
-          Det -> the
+          DET -> the
           N -> cat
           N -> dog
           V -> chased
@@ -56,7 +60,7 @@ def parse(s: str) -> CFG:
     non_terminals.add(lhs)
     rules.append(Rule(lhs, rhs.split()))
     for symbol in rhs.split():
-      if symbol.islower():
+      if not symbol.isupper():
         terminals.add(symbol)
       else:
         non_terminals.add(symbol)
@@ -66,22 +70,23 @@ def parse(s: str) -> CFG:
 def test_parse():
   grammar_str = '''
         S -> NP VP
-        NP -> Det N
+        NP -> DET N
         VP -> V NP
-        Det -> the
+        DET -> the
         N -> cat
         N -> dog
         V -> chased
         '''
   cfg = parse(grammar_str)
+  print(cfg)
   assert cfg.start == 'S'
   assert cfg.terminals == {'the', 'cat', 'dog', 'chased'}
-  assert cfg.non_terminals == {'S', 'NP', 'VP', 'Det', 'N', 'V'}
+  assert cfg.non_terminals == {'S', 'NP', 'VP', 'DET', 'N', 'V'}
   assert len(cfg.rules) == 7
   assert Rule('S', ['NP', 'VP']) in cfg.rules
-  assert Rule('NP', ['Det', 'N']) in cfg.rules
+  assert Rule('NP', ['DET', 'N']) in cfg.rules
   assert Rule('VP', ['V', 'NP']) in cfg.rules
-  assert Rule('Det', ['the']) in cfg.rules
+  assert Rule('DET', ['the']) in cfg.rules
   assert Rule('N', ['cat']) in cfg.rules
   assert Rule('N', ['dog']) in cfg.rules
   assert Rule('V', ['chased']) in cfg.rules
@@ -122,28 +127,47 @@ def interpret(tokens: list[str], cfg: CFG) -> Optional[Tree]:
 
 
 def generate(
-  cfg: CFG,
+  cfg: CFG, 
   gen: np.random.Generator = np.random.default_rng()
 ) -> list[str]:
-  def expand(symbol: str) -> list[str]:
+  result = []
+  stack = [(cfg.start, False)]  # (symbol, is_expanded)
+  
+  while stack:
+    symbol, is_expanded = stack.pop()
+    
+    if is_expanded:
+      result.append(symbol)
+      continue
+      
     if symbol in cfg.terminals:
-      return [symbol]
+      result.append(symbol)
+      continue
+      
     matching_rules = [r for r in cfg.rules if r.lhs == symbol]
-    chosen_rule = matching_rules[gen.integers(0, len(matching_rules))]
-    result = []
-    for sym in chosen_rule.rhs:
-      result.extend(expand(sym))
-    return result
-
-  return expand(cfg.start)
+    while True:
+      chosen_rule = matching_rules[gen.integers(0, len(matching_rules))]
+      temp_stack = [(s, False) for s in reversed(chosen_rule.rhs)]
+      
+      # Check length limit
+      temp_result = len(result)
+      for s, _ in temp_stack:
+        if s in cfg.terminals:
+          temp_result += 1
+        
+      if not cfg.limit or temp_result <= cfg.limit:
+        stack.extend(temp_stack)
+        break
+        
+  return result
 
 
 def test_generate():
   grammar_str = """
     S -> NP VP
-    NP -> Det N
+    NP -> DET N
     VP -> V NP
-    Det -> the
+    DET -> the
     N -> cat
     N -> dog
     V -> chased
@@ -160,9 +184,9 @@ def test_generate():
 def test_interpret():
   grammar_str = """
     S -> NP VP
-    NP -> Det N
+    NP -> DET N
     VP -> V NP
-    Det -> the
+    DET -> the
     N -> cat
     N -> dog
     V -> chased
@@ -187,5 +211,4 @@ if __name__ == "__main__":
   test_parse()
   test_generate()
   test_interpret()
-
 # %%
