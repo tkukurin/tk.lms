@@ -301,8 +301,11 @@ class Experiment(experiment.AbstractExperiment):
         # get until end of all examples
         sep_idx = jnp.where(prompt == self.start_id)[0][0]
         prompt = prompt[None, :sep_idx+1]
+        if self.cfg.losses.output:
+            model_wrap = lambda x: model(x, train=False)[0]
+        else: model_wrap = model
         model_sample = generate(
-            model,
+            model_wrap,
             grng, 
             prompt,
             max_length=25,
