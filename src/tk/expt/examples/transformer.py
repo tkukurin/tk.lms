@@ -10,7 +10,8 @@ import tk
 import json
 import os
 import signal
-import logging
+from tk.utils.data import vocab as vlib
+import itertools as it
 
 from absl import logging
 
@@ -50,6 +51,7 @@ def get_config(debug: str = '0'):
     cfg.project_name = "[untitled]"
     cfg.experiment_class = Experiment
     cfg.experiment_kwargs = dict(
+        grammar_template=vlib._TURTLE_GRAMMAR_INTERNAL_REF,
         debug=cfg.debug,
         lr=1e-4,
         batch_size=4,
@@ -58,7 +60,7 @@ def get_config(debug: str = '0'):
         ),
         model_config=GPTConfig(
             vocab_size=-1,
-            block_size=m(512, 16),
+            block_size=m(64, 16),
             num_heads=8,
             num_layers=6,
             num_embeds=256,
@@ -94,8 +96,6 @@ def create_train_state(rng, model, learning_rate, maxseq=2048):
     return tslib.TrainState.create(
         apply_fn=model.apply, params=params, tx=tx)
 
-from tk.utils.data import vocab as vlib
-import itertools as it
 
 
 def _forever_iter(
@@ -177,14 +177,16 @@ class Experiment(experiment.AbstractExperiment):
         super().__init__(mode, init_rng)
         seqlen = cfg.model_config.block_size
         vocab, nxt = vlib.mockgen_cfg(
-            vlib._TEST_GRAMMAR,
+            cfg.grammar_template,
             np.random.default_rng(jax.device_get(init_rng)),
-            seqlen)
-
+            seqlen=seqlen
+        )
+        
         self.pad_id = vocab['<pad>']
         self.start_id = vocab['<s>']
         self.tok2id = vocab
         self.id2tok = vocab.inverse()
+        assert len(self.tok2id) == len(self.id2tok)
         
         r1, r2, r3, init_rng = jax.random.split(init_rng, 4)
         bsiz = cfg.batch_size
@@ -200,8 +202,7 @@ class Experiment(experiment.AbstractExperiment):
         model_cfg: GPTConfig = cast(GPTConfig, cfg.model_config)
         model_cfg = GPTConfig(**{
             **model_cfg.__dict__, 
-            # TODO(tk) standard vocab problem
-            'vocab_size': 16, #len(self.tok2id)
+            'vocab_size': len(self.tok2id),
         })
         self.model = GPT(config=model_cfg)
         self.state = create_train_state(

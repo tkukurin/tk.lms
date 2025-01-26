@@ -72,6 +72,30 @@ _TURTLE_GRAMMAR = """
     C -> green
 """
 
+# internally-referential grammar 
+# TODO make as parametrizable or something
+_TURTLE_GRAMMAR_INTERNAL_REF = """
+S -> <s> S0 I </s>
+S0 -> ( N , N ) C <instr>
+VARS -> N
+I -> I1|I2|I3|I4
+I1 -> ( 1 ) M
+I2 -> ( 2 ) M M 
+I3 -> ( 3 ) M M M
+I4 -> ( 4 ) M M M M
+I -> M
+M -> up N
+M -> down N
+M -> color C
+N -> 1
+N -> 2
+N -> 3
+C -> reset
+C -> red
+C -> blue
+C -> green
+"""
+
 from tk.utils import cfg as clib
 
 def mockgen_cfg(
@@ -139,6 +163,18 @@ def mockgen_turtle(
     return parser
 
 
+def mockgen_pyform():
+    import pyformlang.cfg as clib
+    cfg = clib.CFG.from_text("""
+        S -> "<s>" NP VP "</s>"
+        NP -> Det N
+        VP -> V NP
+        Det -> "the"
+        N -> "cat"|"dog"
+        V -> "chased"
+    """)
+    return cfg
+
 
 def turtle_interpret(xs: list[str]):
     xs = xs[xs.index('<s>') + 1:xs.index('</s>')]
@@ -165,7 +201,7 @@ def turtle_interpret(xs: list[str]):
         else:
             assert x in ops, f"{x=}, {xs=}"
             xstate = x
-    return state0, state, traces
+    return traces
 
 
 def mockgen(
@@ -204,7 +240,10 @@ if __name__ == '__main__':
         voc.inverse()[tok] for tok in toks
     ])
     print(tokstr)
-    print(turtle_interpret(tokstr))
+    s0, s, traces = turtle_interpret(tokstr)
+    print(s0)
+    print(s)
+    print(traces)
     print(mask)
     print(len(voc), voc.values())
     assert len(mask) == len(toks)
