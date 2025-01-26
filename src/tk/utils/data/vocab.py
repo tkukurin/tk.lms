@@ -83,7 +83,7 @@ I1 -> ( 1 ) M
 I2 -> ( 2 ) M M 
 I3 -> ( 3 ) M M M
 I4 -> ( 4 ) M M M M
-I -> M
+# I -> M
 M -> up N
 M -> down N
 M -> color C
@@ -177,6 +177,10 @@ def mockgen_pyform():
 
 
 def turtle_interpret(xs: list[str]):
+    """clunky ad hoc state machine for turtle grammar
+
+    defines some behavior we want to imagine the program implements.
+    """
     xs = xs[xs.index('<s>') + 1:xs.index('</s>')]
     # ( 1 , 2 ) red <instr>
     state = state0 = int(xs[1]), int(xs[3]), xs[5]
@@ -198,8 +202,17 @@ def turtle_interpret(xs: list[str]):
             state = ((a + da) % mod, (b + db) % mod, c)
             traces.append((xstate, p, state))
             xstate = None
+        elif xstate is None:
+            assert x in ('(', ), f"{i=} {x=}, {xs=}"
+            xstate = 'length_define'
+        elif xstate in ('length_define', ):
+            assert x.isdigit(), f"{i=} {x=}, {xs=}"
+            xstate = 'length_close'
+        elif xstate in ('length_close', ):
+            assert x in (')', )
+            xstate = 'length_closed'
         else:
-            assert x in ops, f"{x=}, {xs=}"
+            assert x in ops, f"{i=} {x=}, {xs=}"
             xstate = x
     return traces
 
@@ -233,14 +246,14 @@ def mockgen(
 
 
 if __name__ == '__main__':
-    voc, nxt = mockgen_cfg(_TURTLE_GRAMMAR, seqlen=16)
+    voc, nxt = mockgen_cfg(_TURTLE_GRAMMAR_INTERNAL_REF, seqlen=16)
     print(voc)
     toks, mask = nxt()
     tokstr = ([
         voc.inverse()[tok] for tok in toks
     ])
     print(tokstr)
-    s0, s, traces = turtle_interpret(tokstr)
+    traces = turtle_interpret(tokstr)
     print(s0)
     print(s)
     print(traces)
@@ -250,7 +263,7 @@ if __name__ == '__main__':
 # %%
 if __name__ == '__main__':
     for _ in range(50):
-        voc, nxt = mockgen_cfg(_TURTLE_GRAMMAR, seqlen=16)
+        voc, nxt = mockgen_cfg(_TURTLE_GRAMMAR_INTERNAL_REF, seqlen=64)
         print(voc)
         toks, mask = nxt()
         tokstr = ([
@@ -265,4 +278,7 @@ if __name__ == '__main__':
 #     p = mockgen_turtle(seqlen=16)
 #     print(p.rules)
 #     print(p.grammar.rule_defs)
+# %%
+cfg = clib.parse(_TURTLE_GRAMMAR_INTERNAL_REF)
+cfg.rules
 # %%
