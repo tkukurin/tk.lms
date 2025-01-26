@@ -134,7 +134,7 @@ def mockgen_cfg(
             output = traces[-1][-1]
             output = [voc[str(x)] for x in output]
             if with_output in ('concat', ):
-                seq = seq + [sep] + output
+                seq = seq[:-1] + [sep] + output + [end]
                 output = None  # we concat'd above already
             else:
                 assert output in (True, )
@@ -211,7 +211,8 @@ def turtle_interpret(xs: list[str]):
             a, b, c = state
             ud = xstate in ('up', 'down')
             lr = xstate in ('left', 'right')
-            p = int(x) if ud or lr else 0
+            m = -1 if xstate in ('down', 'left') else 1
+            p = (m * int(x)) if ud or lr else 0
             da, db = (p if ud else 0, p if lr else 0)
             if xstate in ('color', ):
                 c = state0[-1] if x == 'reset' else x
@@ -228,6 +229,8 @@ def turtle_interpret(xs: list[str]):
             assert x in (')', )
             xstate = 'length_closed'
         else:
+            # NOTE(tk) I adhoc set this
+            if x == '<sep>': break
             assert x in ops, f"{i=} {x=}, {xs=}"
             xstate = x
     return traces
@@ -264,7 +267,7 @@ def mockgen(
 if __name__ == '__main__':
     voc, nxt = mockgen_cfg(_TURTLE_GRAMMAR_INTERNAL_REF, seqlen=64)
     print(voc)
-    toks, mask, outs, *_ = nxt(True)
+    toks, mask, outs, *_ = nxt('concat')
     tokstr = ([
         voc.inverse()[tok] for tok in toks
     ])

@@ -286,15 +286,15 @@ class Experiment(experiment.AbstractExperiment):
         # since eval is multithread, can cause out of sync w train global step 
         # then wandb just disregards the metric. https://wandb.me/define-metric
         writer.write_scalars(None, metrics)
-
+        # TODO acc compute
         model = self.model.bind(self.state.params, rngs={'dropout': drng})
         rng, sample_rng = jax.random.split(rng)
         eval_idx = jax.random.randint(
             sample_rng, (), 0, len(batch)).item()
-        prompt = batch['input_ids'][eval_idx]
-        # get until end of all examples
-        sep_idx = jnp.where(prompt == self.start_id)[0][0]
-        prompt = prompt[None, :sep_idx+1]
+        prompt = batch['input_ids'][eval_idx:eval_idx + 1]
+        sep_idx = jax.random.randint(
+            sample_rng, (), 0, prompt.shape[1]).item()
+        prompt = prompt[..., :sep_idx]
         if self.cfg.losses.output in ('y', ):
             model_wrap = lambda x: model(x, train=False)[0]
         else: model_wrap = lambda x: model(x, train=False)
