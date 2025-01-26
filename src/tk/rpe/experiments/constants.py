@@ -52,7 +52,7 @@ CURRICULUM_BUILDERS = {
 }
 
 TASK_BUILDERS = {
-    'twoval': dependencies.TwoValCopy,
+    'twoval': dependencies.MultiTokenDep,
     'even_pairs': even_pairs.EvenPairs,
     'modular_arithmetic': functools.partial(
         modular_arithmetic.ModularArithmetic, modulus=5
