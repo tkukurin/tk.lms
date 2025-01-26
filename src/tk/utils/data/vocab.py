@@ -5,7 +5,7 @@ import numpy as np
 import dataclasses as dc
 import itertools as it
 
-from typing import NamedTuple, TypedDict
+from typing import Literal, NamedTuple, TypedDict
 
 
 class TokTypes(TypedDict):
@@ -109,7 +109,7 @@ def mockgen_cfg(
         'terminals': list(cfg.terminals),
         # TODO this is specifically for turtle
         'nums': list('0123456789'),
-        'special': ['<s>', '</s>', '<pad>'],
+        'special': ['<s>', '</s>', '<pad>', '<sep>'],
     })
     voc.limit = seqlen
     assert ('</s>' in voc and '<pad>' in voc), (
@@ -117,7 +117,8 @@ def mockgen_cfg(
     )
     pad = voc['<pad>']
     end = voc['</s>']
-    def nxt(with_output: bool = False):
+    sep = voc['<sep>']
+    def nxt(with_output: Literal['concat', 'y', None] = None):
         nfail = 0
         while len(seq := clib.generate(cfg, gen)) > (seqlen or 99999):
             nfail += 1
@@ -127,15 +128,22 @@ def mockgen_cfg(
         seq = [voc[x] for x in seq]
         closer = seq.index(end)
         seq = seq[:closer + 1]
-        pads = [pad] * (seqlen - len(seq)) if seqlen else []
-        seq = seq + pads
-        mask = [1] * (closer + 1) + [0] * (len(seq) - (closer + 1))
         output = None
         if with_output:
             traces = turtle_interpret(seq_str)
             output = traces[-1][-1]
             output = [voc[str(x)] for x in output]
+            if with_output in ('concat', ):
+                seq = seq + [sep] + output
+                output = None  # we concat'd above already
+            else:
+                assert output in (True, )
+        mask = [1] * len(seq) + (
+            [0] * (seqlen - len(seq)) if seqlen else [])
+        seq = seq + (
+            [pad] * (seqlen - len(seq)) if seqlen else [])
         return Batch(seq, mask, output)
+
     return voc, nxt
 
 

@@ -50,7 +50,7 @@ def get_config(debug: str = '0'):
     cfg.debug = debug in truthy
     cfg.project_name = "[untitled]"
     cfg.experiment_class = Experiment
-    with_output = True
+    with_output = 'concat'
     cfg.experiment_kwargs = dict(
         losses=dict(
             autoregressive=True,
@@ -70,7 +70,7 @@ def get_config(debug: str = '0'):
             num_layers=6,
             num_embeds=256,
             use_bias=True,
-            output_head=3 if with_output else None,
+            output_head=3 if with_output in ('y',) else None,
             dtype='float16',
         ),
     )
@@ -125,7 +125,8 @@ def _forever_iter(
                 yield {
                     'input_ids': jnp.array(tokenss),
                     'attention_mask': jnp.array(maskss),
-                    'output_ids': jnp.array(outss) if cfg.losses.output else None,
+                    'output_ids': (
+                        jnp.array(outss) if cfg.losses.output in ('y', ) else None),
                 }
         return _inner
 
@@ -142,20 +143,13 @@ def _forever_iter(
 
 
 def generate(
-    model: GPT,
-    rng: jax.Array,
+    model: Callable[[jax.Array], jax.Array],
+    # rng: jax.Array,
     start_tokens: jax.Array,
     max_length: int,
-    top_p: float = 0.9,
+    # top_p: float = 0.9,
     terminal_token: int | None = None,
 ):
-    """Generates text using nucleus sampling from a pre-trained language model.
-
-    Notes:
-        - Generation stops early if the pad token is generated
-        - Uses nucleus (top-p) sampling for token selection
-        - Decodes token IDs to strings using global id2tok mapping
-    """
     curr_ids = start_tokens
     for _ in trange(max_length, desc="Generating"):
         output = model(curr_ids)
@@ -228,7 +222,7 @@ class Experiment(experiment.AbstractExperiment):
                 rngs={'dropout': rng},
                 train=True
             )
-            if self.cfg.losses.output:
+            if self.cfg.losses.output in ('y', ):
                 logits, outputs = logits
             shift_logits = logits[:, :-1]
             shift_labels = batch['input_ids'][:, 1:]
@@ -243,7 +237,7 @@ class Experiment(experiment.AbstractExperiment):
                 loss = loss * padding_mask
                 loss = loss.sum() / padding_mask.sum()
                 loss_all += loss
-            if self.cfg.losses.output:
+            if self.cfg.losses.output in ('y', ):
                 output_labels = batch['output_ids']
                 l = self.cfg.model_config.output_head
                 loss = optax.softmax_cross_entropy_with_integer_labels(
@@ -275,7 +269,7 @@ class Experiment(experiment.AbstractExperiment):
             rngs={'dropout': drng},
             train=False
         )
-        if self.cfg.losses.output:
+        if self.cfg.losses.output in ('y', ):
             logits, _ = logits
         shift_logits = logits[:, :-1]
         shift_labels = batch['input_ids'][:, 1:]
@@ -301,16 +295,16 @@ class Experiment(experiment.AbstractExperiment):
         # get until end of all examples
         sep_idx = jnp.where(prompt == self.start_id)[0][0]
         prompt = prompt[None, :sep_idx+1]
-        if self.cfg.losses.output:
+        if self.cfg.losses.output in ('y', ):
             model_wrap = lambda x: model(x, train=False)[0]
-        else: model_wrap = model
+        else: model_wrap = lambda x: model(x, train=False)
         model_sample = generate(
             model_wrap,
-            grng, 
+            # grng, 
             prompt,
-            max_length=25,
-            top_p=0.9,
-            terminal_token=self.pad_id,
+            max_length=64,
+            # top_p=0.9,
+            terminal_token=self.tok2id.get('</s>'),
         )
         for in_, out_ in zip(
             jax.device_get(prompt), 
