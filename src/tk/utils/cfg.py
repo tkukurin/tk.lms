@@ -99,12 +99,12 @@ def parse(s: str, **kwargs) -> CFG:
     non_terminals.add(lhs)
     for rhs in _parse_rhs(rhs):
       rules.append(Rule(lhs, rhs))
-    for symbol in rules[-1].rhs:
-      # if symbol.kind == 't':
-      if not symbol.isupper():
-        terminals.add(symbol)
-      else:
-        non_terminals.add(symbol)
+      for symbol in rules[-1].rhs:
+        # if symbol.kind == 't':
+        if not symbol.isupper():
+          terminals.add(symbol)
+        else:
+          non_terminals.add(symbol)
   return CFG(terminals, non_terminals, rules, start or "S", **kwargs)
 
 

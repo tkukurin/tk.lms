@@ -77,23 +77,17 @@ _TURTLE_GRAMMAR = """
 _TURTLE_GRAMMAR_INTERNAL_REF = """
 S -> <s> S0 I </s>
 S0 -> ( N , N ) C <instr>
-VARS -> N
+# VARS -> N
 I -> I1|I2|I3|I4
 I1 -> ( 1 ) M
 I2 -> ( 2 ) M M 
 I3 -> ( 3 ) M M M
 I4 -> ( 4 ) M M M M
 # I -> M
-M -> up N
-M -> down N
-M -> color C
-N -> 1
-N -> 2
-N -> 3
-C -> reset
-C -> red
-C -> blue
-C -> green
+M -> up|down N
+M -> color C|reset
+N -> 1|2|3
+C -> red|blue|green
 """
 
 from tk.utils import cfg as clib
@@ -180,6 +174,7 @@ def turtle_interpret(xs: list[str]):
     """clunky ad hoc state machine for turtle grammar
 
     defines some behavior we want to imagine the program implements.
+    not overly thought through, just a sketch.
     """
     xs = xs[xs.index('<s>') + 1:xs.index('</s>')]
     # ( 1 , 2 ) red <instr>
@@ -201,7 +196,7 @@ def turtle_interpret(xs: list[str]):
                 c = state0[-1] if x == 'reset' else x
             state = ((a + da) % mod, (b + db) % mod, c)
             traces.append((xstate, p, state))
-            xstate = None
+            xstate = 'instr_or_end'
         elif xstate is None:
             assert x in ('(', ), f"{i=} {x=}, {xs=}"
             xstate = 'length_define'
@@ -246,7 +241,7 @@ def mockgen(
 
 
 if __name__ == '__main__':
-    voc, nxt = mockgen_cfg(_TURTLE_GRAMMAR_INTERNAL_REF, seqlen=16)
+    voc, nxt = mockgen_cfg(_TURTLE_GRAMMAR_INTERNAL_REF, seqlen=64)
     print(voc)
     toks, mask = nxt()
     tokstr = ([
@@ -254,8 +249,8 @@ if __name__ == '__main__':
     ])
     print(tokstr)
     traces = turtle_interpret(tokstr)
-    print(s0)
-    print(s)
+    print('s0', traces[0])
+    print('sN', traces[-1])
     print(traces)
     print(mask)
     print(len(voc), voc.values())
