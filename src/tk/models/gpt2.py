@@ -22,6 +22,7 @@ class GPTConfig:
     num_embeds: int = 768
     dropout_rate: float = 0.1
     use_bias: bool = True
+    output_head: int | None = None
     # TODO remove this??
     dtype: Optional[str] = None
 
@@ -136,7 +137,15 @@ class GPT(nn.Module):
             use_bias=self.config.use_bias, 
             name='ln_f')(x)
         logits = wte.attend(x)
-        return logits
+        ys = []
+        for i in range(self.config.output_head or 0):
+            y = logits[:, -1, :]
+            y = nn.Dense(
+                self.config.vocab_size,
+                dtype=self.config.dtype, 
+                name=f'out{i}')(y)
+            ys.append(y)
+        return logits, jnp.vstack(ys)
 
     # def init(self, rng):
     #     """

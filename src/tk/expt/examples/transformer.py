@@ -46,11 +46,16 @@ def get_config(debug: str = '0'):
         """Convenience for debug runs."""
         return debug_value if (debug in truthy) else default_value
 
-    cfg = base_config.get_base_config()
+    cfg: config_dict.ConfigDict = base_config.get_base_config()
     cfg.debug = debug in truthy
     cfg.project_name = "[untitled]"
     cfg.experiment_class = Experiment
+    with_output = True
     cfg.experiment_kwargs = dict(
+        losses=dict(
+            autoregressive=True,
+            output=with_output,
+        ),
         grammar_template=vlib._TURTLE_GRAMMAR_INTERNAL_REF,
         debug=cfg.debug,
         lr=1e-4,
@@ -65,6 +70,7 @@ def get_config(debug: str = '0'):
             num_layers=6,
             num_embeds=256,
             use_bias=True,
+            output_head=3 if with_output else None,
             dtype='float16',
         ),
     )
@@ -99,32 +105,32 @@ def create_train_state(rng, model, learning_rate, maxseq=2048):
 
 
 def _forever_iter(
-    ds, bsiz: int, rng: jax.Array, debug: bool = False):
+    ds, bsiz: int, rng: jax.Array, cfg: config_dict.ConfigDict
+):
     """Get infinite stream of batched samples."""
 
     gen = np.random.default_rng(jax.device_get(rng))
 
     if isinstance(ds, Callable):
         def _inner():
-            if False:  # NOTE(tk) maybe no debug single batch
-                batch = [ds() for _ in range(bsiz)]
-                batch = {'input_ids': jnp.array(batch)}
-                while True: yield batch
-            else:
-                while True:
-                    tokenss = []
-                    maskss = []
-                    for _ in range(bsiz):
-                        tokens, mask = ds()
-                        tokenss.append(tokens)
-                        maskss.append(mask)
-                    yield {
-                        'input_ids': jnp.array(tokenss),
-                        'attention_mask': jnp.array(maskss)}
+            while True:
+                tokenss = []
+                maskss = []
+                outss = []
+                for _ in range(bsiz):
+                    tokens, mask, outs = ds(cfg.losses.output)
+                    tokenss.append(tokens)
+                    maskss.append(mask)
+                    outss.append(outs)
+                yield {
+                    'input_ids': jnp.array(tokenss),
+                    'attention_mask': jnp.array(maskss),
+                    'output_ids': jnp.array(outss) if cfg.losses.output else None,
+                }
         return _inner
 
     data = jnp.array(ds['input_ids'])
-    if debug:
+    if cfg.debug:
         data = data[:bsiz]
         logging.warning(f"DEBUG: 1 batch to overfit ({data.shape=}):\n{data}")
     nsample = min(len(data), bsiz)
@@ -191,11 +197,11 @@ class Experiment(experiment.AbstractExperiment):
         r1, r2, r3, init_rng = jax.random.split(init_rng, 4)
         bsiz = cfg.batch_size
         self._train = utils.py_prefetch(
-            _forever_iter(nxt, bsiz, r2, cfg.debug),
+            _forever_iter(nxt, bsiz, r2, cfg),
             buffer_size=2,
         )
         self._test = utils.py_prefetch(
-            _forever_iter(nxt, bsiz, r3, cfg.debug), 
+            _forever_iter(nxt, bsiz, r3, cfg), 
             buffer_size=2,
         )
         # Initialize model
@@ -215,23 +221,36 @@ class Experiment(experiment.AbstractExperiment):
         global_step = np.array(utils.get_first(global_step))
 
         def loss_fn(params):
+            B, T = batch['input_ids'].shape
             logits = self.state.apply_fn(
                 params, 
                 batch['input_ids'], 
                 rngs={'dropout': rng},
                 train=True
             )
+            if self.cfg.losses.output:
+                logits, outputs = logits
             shift_logits = logits[:, :-1]
             shift_labels = batch['input_ids'][:, 1:]
-            loss = optax.softmax_cross_entropy_with_integer_labels(
-                shift_logits, shift_labels)
-            if 'attention_mask' in batch:
-                padding_mask = batch['attention_mask'][:, 1:]
-            else:
-                padding_mask = shift_labels != self.pad_id
-            loss = loss * padding_mask
-            loss = loss.sum() / padding_mask.sum()
-            return loss
+            loss_all = 0
+            if self.cfg.losses.autoregressive:
+                loss = optax.softmax_cross_entropy_with_integer_labels(
+                    shift_logits, shift_labels)
+                if 'attention_mask' in batch:
+                    padding_mask = batch['attention_mask'][:, 1:]
+                else:
+                    padding_mask = shift_labels != self.pad_id
+                loss = loss * padding_mask
+                loss = loss.sum() / padding_mask.sum()
+                loss_all += loss
+            if self.cfg.losses.output:
+                output_labels = batch['output_ids']
+                l = self.cfg.model_config.output_head
+                loss = optax.softmax_cross_entropy_with_integer_labels(
+                    outputs.reshape((B, l, -1)), output_labels)
+                loss = loss.sum() / (B * l)
+                loss_all += loss
+            return loss_all
 
         loss, grads = jax.value_and_grad(loss_fn)(
             self.state.params)
@@ -242,6 +261,10 @@ class Experiment(experiment.AbstractExperiment):
         return metrics
     
     def evaluate(self, *, global_step, rng, writer):
+        if not isinstance(self.cfg, config_dict.ConfigDict):
+            # TODO(tk) when becomes dict?! [prob loading]
+            logging.warning(f"{type(self.cfg)=} [wrapping]")
+            self.cfg = config_dict.ConfigDict(self.cfg)
         batch = next(self._test)
         rng = utils.get_first(rng)
         rng, drng, grng = jax.random.split(rng, 3)
@@ -252,6 +275,8 @@ class Experiment(experiment.AbstractExperiment):
             rngs={'dropout': drng},
             train=False
         )
+        if self.cfg.losses.output:
+            logits, _ = logits
         shift_logits = logits[:, :-1]
         shift_labels = batch['input_ids'][:, 1:]
         loss = optax.softmax_cross_entropy_with_integer_labels(

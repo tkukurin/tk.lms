@@ -5,7 +5,7 @@ import numpy as np
 import dataclasses as dc
 import itertools as it
 
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
 
 
 class TokTypes(TypedDict):
@@ -92,6 +92,13 @@ C -> red|blue|green
 
 from tk.utils import cfg as clib
 
+
+class Batch(NamedTuple):
+    input_ids: list[int]
+    attention_mask: list[int]
+    output_ids: list[int] | None | int
+
+
 def mockgen_cfg(
     grammar: str,
     gen: np.random.Generator = np.random.default_rng(),
@@ -110,19 +117,25 @@ def mockgen_cfg(
     )
     pad = voc['<pad>']
     end = voc['</s>']
-    def nxt():
+    def nxt(with_output: bool = False):
         nfail = 0
         while len(seq := clib.generate(cfg, gen)) > (seqlen or 99999):
             nfail += 1
             if nfail > 128:  # TODO specifically for turtle, use proper cfg
                 raise ValueError(f"failed to generate ({nfail=})")
+        seq_str = seq
         seq = [voc[x] for x in seq]
         closer = seq.index(end)
         seq = seq[:closer + 1]
         pads = [pad] * (seqlen - len(seq)) if seqlen else []
         seq = seq + pads
         mask = [1] * (closer + 1) + [0] * (len(seq) - (closer + 1))
-        return seq, mask
+        output = None
+        if with_output:
+            traces = turtle_interpret(seq_str)
+            output = traces[-1][-1]
+            output = [voc[str(x)] for x in output]
+        return Batch(seq, mask, output)
     return voc, nxt
 
 
@@ -236,14 +249,14 @@ def mockgen(
         pads = [pad] * (seqlen - len(seq)) if seqlen else []
         seq = seq + pads
         mask = [1] * (closer + 1) + [0] * (len(seq) - (closer + 1))
-        return seq, mask
+        return Batch(seq, mask, None)
     return voc, nxt
 
 
 if __name__ == '__main__':
     voc, nxt = mockgen_cfg(_TURTLE_GRAMMAR_INTERNAL_REF, seqlen=64)
     print(voc)
-    toks, mask = nxt()
+    toks, mask, outs, *_ = nxt(True)
     tokstr = ([
         voc.inverse()[tok] for tok in toks
     ])
@@ -253,6 +266,7 @@ if __name__ == '__main__':
     print('sN', traces[-1])
     print(traces)
     print(mask)
+    print(outs)
     print(len(voc), voc.values())
     assert len(mask) == len(toks)
 # %%
@@ -260,13 +274,14 @@ if __name__ == '__main__':
     for _ in range(50):
         voc, nxt = mockgen_cfg(_TURTLE_GRAMMAR_INTERNAL_REF, seqlen=64)
         print(voc)
-        toks, mask = nxt()
+        toks, mask, outs, *_ = nxt(True)
         tokstr = ([
             voc.inverse()[tok] for tok in toks
         ])
         print(tokstr)
         print(turtle_interpret(tokstr))
         print(mask)
+        print(outs)
         assert len(mask) == len(toks)
 # %%
 # if __name__ == '__main__':
