@@ -110,6 +110,7 @@ class WandbLogger:
 
   def __init__(self, config: config_dict.ConfigDict, mode: str):
     log_dir = os.path.join(config.checkpoint_dir, mode)
+    os.makedirs(log_dir, exist_ok=True)
     wandb.init(
       project=config.get("project_name"),
       dir=log_dir, 
