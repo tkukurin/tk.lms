@@ -37,6 +37,16 @@ from flax import linen as nn
 import inspect
 
 
+def _non_ar_output(cfg):
+    """whether we also want to output non-autoregressive.
+
+    this is adhoc domain specific stuffs.
+    """
+    if isinstance(cfg, config_dict.ConfigDict):
+        return cfg.losses.output in ('y',)
+    return cfg in ('y', )
+
+
 def get_config(debug: str = '0'):
     # NB, I think with ml_collections param has to be a string
     truthy = ('1', 'T', 'True')
@@ -70,7 +80,7 @@ def get_config(debug: str = '0'):
             num_layers=6,
             num_embeds=256,
             use_bias=True,
-            output_head=3 if with_output in ('y',) else None,
+            output_head=3 if _non_ar_output(with_output) else None,
             dtype='float16',
         ),
     )
@@ -126,7 +136,7 @@ def _forever_iter(
                     'input_ids': jnp.array(tokenss),
                     'attention_mask': jnp.array(maskss),
                     'output_ids': (
-                        jnp.array(outss) if cfg.losses.output in ('y', ) else None),
+                        jnp.array(outss) if _non_ar_output(cfg) else None),
                 }
         return _inner
 
@@ -183,6 +193,7 @@ class Experiment(experiment.AbstractExperiment):
         )
         
         self.pad_id = vocab['<pad>']
+        self.sep_id = vocab['<sep>']
         self.start_id = vocab['<s>']
         self.tok2id = vocab
         self.id2tok = vocab.inverse()
@@ -222,7 +233,7 @@ class Experiment(experiment.AbstractExperiment):
                 rngs={'dropout': rng},
                 train=True
             )
-            if self.cfg.losses.output in ('y', ):
+            if _non_ar_output(self.cfg):
                 logits, outputs = logits
             shift_logits = logits[:, :-1]
             shift_labels = batch['input_ids'][:, 1:]
@@ -237,7 +248,7 @@ class Experiment(experiment.AbstractExperiment):
                 loss = loss * padding_mask
                 loss = loss.sum() / padding_mask.sum()
                 loss_all += loss
-            if self.cfg.losses.output in ('y', ):
+            if _non_ar_output(self.cfg):
                 output_labels = batch['output_ids']
                 l = self.cfg.model_config.output_head
                 loss = optax.softmax_cross_entropy_with_integer_labels(
@@ -269,7 +280,7 @@ class Experiment(experiment.AbstractExperiment):
             rngs={'dropout': drng},
             train=False
         )
-        if self.cfg.losses.output in ('y', ):
+        if _non_ar_output(self.cfg):
             logits, _ = logits
         shift_logits = logits[:, :-1]
         shift_labels = batch['input_ids'][:, 1:]
@@ -292,10 +303,11 @@ class Experiment(experiment.AbstractExperiment):
         eval_idx = jax.random.randint(
             sample_rng, (), 0, len(batch)).item()
         prompt = batch['input_ids'][eval_idx:eval_idx + 1]
+        k = jnp.where(prompt == self.sep_id)[0][0]
         sep_idx = jax.random.randint(
-            sample_rng, (), 0, prompt.shape[1]).item()
+            sample_rng, (), 1, k).item()
         prompt = prompt[..., :sep_idx]
-        if self.cfg.losses.output in ('y', ):
+        if _non_ar_output(self.cfg):
             model_wrap = lambda x: model(x, train=False)[0]
         else: model_wrap = lambda x: model(x, train=False)
         model_sample = generate(
