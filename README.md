@@ -6,7 +6,7 @@ Just some LLM experiments.
 Install in editable mode:
 
 ```bash
-python -m venv venv
+uv venv
 source venv/bin/activate.fish
-pip install -e .
+uv pip install -e .
 ```

@@ -14,8 +14,9 @@ dependencies = [
     "datasets",
     "diskcache",
     "rich",
-    "jax[cuda]",
-    # todo cuda?
+    "jax[cpu]",
+    "flax>=0.8.0",
+    "optax>=0.2.0",
     "ipykernel",
     "networkx",
     "scikit-learn",
@@ -32,9 +33,7 @@ dependencies = [
     "penzai",
     "xminigrid",
     # "tensorboardx",
-    # better experiment tracking (I think...)
-    "aim>=3.24.0",
-    # AIM requires plotly for `Figure`s
+    # "aim>=3.24.0",  # removed: aimrocks has no cp313 wheels
     "plotly>=5.23.0",
     # "kaleido",  # plotly to img
     # install for mimetypes!
@@ -85,7 +84,11 @@ column_limit = 80
 indent_width = 2
 
 [tool.uv]
-dev-dependencies = [
-    "pytest>=8.3.3",
+required-environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.3.3",
+]
