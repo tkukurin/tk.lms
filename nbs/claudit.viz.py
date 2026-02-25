@@ -19,20 +19,10 @@ from rich.table import Table
 from rich.syntax import Syntax
 from rich.panel import Panel
 
-from tk import datadir
+import tk
 
-# %% [markdown]
-"""## Constants (reuse from claudit.py)"""
-
-# %%
 CLAUDE_DIR = Path.home() / ".claude"
 TMPDIR_PREFIX = "claudit-"
-
-def default_outdir() -> Path:
-    """Default output: datadir/out/claudit/yymm/"""
-    from datetime import datetime
-    yymm = datetime.now().strftime("%y%m")
-    return datadir / "out" / "claudit" / yymm
 
 # %% [markdown]
 """## Data Loading"""
@@ -77,7 +67,7 @@ def load_meta(outdir: Path, version: str) -> dict:
 def list_versions(outdir: Path | None = None) -> list[str]:
     """List all available versions in output directory."""
     if outdir is None:
-        outdir = default_outdir()
+        outdir = tk.xpdir("out/claudit/%y%m")
     if not outdir.exists():
         return []
 
@@ -347,7 +337,7 @@ class Viz:
 # %%
 if __name__ == "__main__":
     # Example: load and visualize latest version
-    outdir = default_outdir()
+    outdir = tk.xpdir("out/claudit/%y%m")
     versions = list_versions(outdir)
 
     if versions:

@@ -11,6 +11,7 @@ Config file format (python):
     prompt = "your prompt here"
     cwd = "/path/to/sandbox"       # optional, defaults to cwd
     session_id = "abc123"          # optional, for continuing sessions
+    model = "sonnet"               # optional, model alias or full name (e.g. 'opus', 'claude-sonnet-4-5-20250929')
     proj_dir = "/path/to/seed"     # optional, seed project for e2e
     feat_generalize = "..."        # optional, prompt to extract CLAUDE.md
 """
@@ -19,19 +20,18 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-from tk import datadir
+from tqdm import tqdm
+
+import tk
 from tk.eval import code as clib
 
 CLAUDE_DIR = Path.home() / ".claude"
 TMPDIR_PREFIX = "claudit-"
 
-def default_outdir() -> Path:
-    """Default output: datadir/out/claudit/yymm/"""
-    from datetime import datetime
-    yymm = datetime.now().strftime("%y%m")
-    return datadir / "out" / "claudit" / yymm
+
 
 def session_jsonl(sid: str) -> Path | None:
     return next((f for f in (CLAUDE_DIR / "projects").glob(f"*/{sid}.jsonl")), None)
@@ -64,7 +64,7 @@ def load_config(cfg_path: Path) -> dict:
     return {k: v for k, v in ns.items() if not k.startswith("_")}
 
 
-def run_claude(prompt: str, cwd: Path, session_id: str | None = None) -> dict:
+def run_claude(prompt: str, cwd: Path, session_id: str | None = None, logdir: Path | None = None, model: str | None = None) -> dict:
     """Run claude [cli] non-interactively and return parsed JSON output.
 
     settings.json (allow/deny lists) defines *which* paths are accessible; --permission-mode=acceptEdits
@@ -72,11 +72,103 @@ def run_claude(prompt: str, cwd: Path, session_id: str | None = None) -> dict:
 
     [cli]: https://docs.anthropic.com/en/docs/claude-code/cli-reference
     """
-    cmd = ["claude", "-p", prompt, "--output-format", "json", "--permission-mode", "acceptEdits"]
+    cmd = ["claude", "-p", prompt, "--output-format", "stream-json", "--permission-mode", "acceptEdits", "--verbose"]
     if session_id:
         cmd += ["-r", session_id]
-    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=True, timeout=120)
-    return json.loads(r.stdout)
+    if model:
+        cmd += ["--model", model]
+
+    # Setup logging
+    if logdir:
+        logdir.mkdir(parents=True, exist_ok=True)
+        stdout_log = logdir / f"claude_{session_id or 'new'}.stdout.log"
+        stderr_log = logdir / f"claude_{session_id or 'new'}.stderr.log"
+    else:
+        stdout_log = stderr_log = None
+
+    # Run with streaming output for progress tracking
+    with tqdm(desc="Claude", unit=" events", dynamic_ncols=True, leave=True) as pbar:
+        with subprocess.Popen(
+            cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+        ) as proc:
+            stdout_lines = []
+            stderr_lines = []
+            final_result = None
+
+            # Read stdout for streaming JSON events
+            if proc.stdout:
+                for line in proc.stdout:
+                    stdout_lines.append(line)
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        event = json.loads(line)
+                        event_type = event.get("type", "")
+
+                        # Update progress based on event type
+                        if event_type == "assistant":
+                            content = event.get("message", {}).get("content", [])
+                            for item in content:
+                                item_type = item.get("type", "")
+                                if item_type == "thinking":
+                                    pbar.set_postfix_str("thinking...")
+                                    pbar.update(1)
+                                elif item_type == "tool_use":
+                                    tool = item.get("name", "tool")
+                                    pbar.set_postfix_str(f"{tool}")
+                                    pbar.update(1)
+                                elif item_type == "text":
+                                    text = item.get("text", "")[:40]
+                                    if text:
+                                        pbar.set_postfix_str(f"text: {text}...")
+                                        pbar.update(1)
+                        elif event_type == "tool_result":
+                            tool = event.get("tool_name", "")
+                            pbar.set_postfix_str(f"{tool} done")
+                            pbar.update(1)
+                        elif event_type == "result":
+                            final_result = event
+
+                    except json.JSONDecodeError:
+                        pass  # Skip non-JSON lines
+
+            # Read stderr separately
+            if proc.stderr:
+                stderr_text = proc.stderr.read()
+                stderr_lines.append(stderr_text)
+
+            proc.wait()
+
+            stdout_text = "".join(stdout_lines)
+            stderr_text = "".join(stderr_lines)
+
+            # Write logs
+            if stdout_log:
+                stdout_log.write_text(stdout_text)
+            if stderr_log:
+                stderr_log.write_text(stderr_text)
+
+            if proc.returncode != 0:
+                raise subprocess.CalledProcessError(proc.returncode, cmd, stdout_text, stderr_text)
+
+            pbar.set_postfix_str("complete")
+
+    # Return the final result object, or parse last JSON line if no result event
+    if final_result:
+        return final_result
+
+    # Fallback: parse last valid JSON line
+    for line in reversed(stdout_lines):
+        line = line.strip()
+        if line:
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+    raise ValueError("No valid JSON result found in output")
 
 def check_writes_contained(diffs: dict[str, str], cwd: Path) -> tuple[dict[str, str], list[str]]:
     """Post-hoc audit: returns (diffs, escaped_paths). settings.json is the actual guard."""
@@ -86,7 +178,10 @@ def check_writes_contained(diffs: dict[str, str], cwd: Path) -> tuple[dict[str, 
 
 def get_writes(session_id: str, cwd: Path) -> dict[str, str]:
     # TODO i am not sure this is 100% robust
-    lines = session_jsonl(session_id).read_text().splitlines()
+    jsonl = session_jsonl(session_id)
+    if not jsonl:
+        return {}
+    lines = jsonl.read_text().splitlines()
     writes = {}
     for line in lines:
         d = json.loads(line)
@@ -121,27 +216,38 @@ def setup_sandbox(d: Path, proj_dir: Path | None = None, claude_md: str | None =
 
 
 def run_and_collect(prompt: str, cwd: Path, session_id: str | None = None,
-                    followup: str | None = None) -> tuple[str, dict[str, str], str | None]:
+                    followup: str | None = None, logdir: Path | None = None, model: str | None = None) -> tuple[str, dict[str, str], str | None]:
     """Run claude, optionally followup, return (session_id, writes, agents_content)."""
-    r = run_claude(prompt, cwd, session_id)
+    r = run_claude(prompt, cwd, session_id, logdir=logdir, model=model)
     sid = r["session_id"]
     if followup:
-        run_claude(followup, cwd, sid)
+        run_claude(followup, cwd, sid, logdir=logdir, model=model)
     writes, esc = check_writes_contained(get_writes(sid, cwd), cwd)
     if esc: print(f"[warn] writes escaped sandbox: {esc}")
     writes, agents = split_agents_diff(writes)
     return sid, writes, agents
 
 
-def save_run(outdir: Path, name: str, session_id: str, writes: dict[str, str]) -> Path:
-    """Save session transcript + writes to outdir/name/."""
-    d = outdir / name
-    d.mkdir(parents=True, exist_ok=True)
-    jsonl = session_jsonl(session_id)
-    if jsonl: shutil.copy(jsonl, d / "transcript.jsonl")
-    for path, content in writes.items():
-        (d / Path(path).name).write_text(content)
-    return d
+def mv_sanbox(base: Path, out: Path, session_id: str | None = None, flatten: bool = False) -> Path:
+    """move files to output directory. Returns output path."""
+    # copy transcript if session_id provided
+    if session_id:
+        jsonl = session_jsonl(session_id)
+        if jsonl:
+            out.mkdir(parents=True, exist_ok=True)
+            shutil.copy(jsonl, out / "transcript.jsonl")
+
+    if flatten:
+        # flatten: copy all files to out root
+        out.mkdir(parents=True, exist_ok=True)
+        for f in base.rglob("*"):
+            if f.is_file() and f.name not in ("settings.json",):
+                shutil.copy(f, out / f.name)
+    else:
+        # preserve structure: copy entire tmpdir
+        shutil.copytree(base, out, dirs_exist_ok=True, ignore=shutil.ignore_patterns("settings.json", ".claude"))
+
+    return out
 
 
 def meta_diff(d1: dict[str, str], d2: dict[str, str]) -> dict:
@@ -172,10 +278,16 @@ def cmd_claude(args):
         sys.exit("config must define 'prompt'")
     cwd = Path(cfg.get("cwd", ".")).resolve()
     session_id = cfg.get("session_id")
+    model = cfg.get("model")
     if not cwd.exists():
         cwd.mkdir(parents=True)
     write_settings(cwd)
-    result = run_claude(prompt, cwd, session_id)
+
+    # Setup log directory
+    logdir = Path(tempfile.mkdtemp(prefix=f"{TMPDIR_PREFIX}logs-"))
+    print(f"logs: {logdir}")
+
+    result = run_claude(prompt, cwd, session_id, logdir=logdir, model=model)
     print(json.dumps(result, indent=2))
 
 
@@ -192,23 +304,10 @@ def cmd_list(args):
 
 
 def cmd_mv(args):
-    """Move sandbox files + transcript to output directory."""
+    """Move sandbox (entire tmpdir) to output directory."""
     base = Path(args.base).resolve()
-    out = Path(args.out).resolve() if args.out else default_outdir() / base.name
-    out.mkdir(parents=True, exist_ok=True)
-
-    # copy transcript if session_id provided
-    if args.session_id:
-        jsonl = session_jsonl(args.session_id)
-        if jsonl:
-            shutil.copy(jsonl, out / "transcript.jsonl")
-
-    # copy all files from base (flatten or preserve structure)
-    for f in base.rglob("*"):
-        if f.is_file() and f.name not in ("settings.json",):
-            dest = out / f.name if args.flatten else out / f.relative_to(base)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy(f, dest)
+    out = Path(args.out).resolve() if args.out else tk.xpdir("out/claudit/%y%m") / base.name
+    mv_sanbox(base, out, session_id=args.session_id, flatten=args.flatten)
     print(f"moved {base} -> {out}")
 
 
@@ -229,26 +328,31 @@ def cmd_diff(args):
 
 def cmd_e2e(args):
     """End-to-end: run norule -> extract CLAUDE.md -> run yerule -> diff."""
-    import tempfile
     cfg = load_config(Path(args.config))
     prompt = cfg.get("prompt") or sys.exit("config must define 'prompt'")
     feat_gen = cfg.get("feat_generalize",
         "Generalize the coding preferences from this conversation into a CLAUDE.md rule.")
     proj_dir = Path(cfg["proj_dir"]) if cfg.get("proj_dir") else None
+    model = cfg.get("model")
 
     base = Path(tempfile.mkdtemp(prefix=TMPDIR_PREFIX))
+    logdir = base / "logs"
     print(f"sandbox: {base}")
+    print(f"logs: {logdir}")
 
-    print("running norule...")
-    sid1, w1, agents = run_and_collect(prompt, setup_sandbox(base / "norule", proj_dir), followup=feat_gen)
-    print("running yerule...")
-    sid2, w2, _ = run_and_collect(prompt, setup_sandbox(base / "yerule", proj_dir, agents))
+    print("\n[1/2] running norule...")
+    sid1, w1, agents = run_and_collect(prompt, setup_sandbox(base / "norule", proj_dir), followup=feat_gen, logdir=logdir, model=model)
+    print("\n[2/2] running yerule...")
+    sid2, w2, _ = run_and_collect(prompt, setup_sandbox(base / "yerule", proj_dir, agents), logdir=logdir, model=model)
 
-    outdir = default_outdir()
+    # Move entire tmpdir to output (includes norule/, yerule/, logs/)
+    outdir = tk.xpdir("out/claudit/%y%m")
     suffix = get_vnext(outdir)
-    save_run(outdir, f"norule.{suffix}", sid1, w1)
-    save_run(outdir, f"yerule.{suffix}", sid2, w2).joinpath("CLAUDE.md").write_text(agents or "")
-    (outdir / f"meta.{suffix}.json").write_text(json.dumps(meta_diff(w1, w2), indent=2))
+    out = mv_sanbox(base, outdir / suffix)
+
+    # Write CLAUDE.md and meta diff
+    (out / "CLAUDE.md").write_text(agents or "")
+    (out / "meta.json").write_text(json.dumps(meta_diff(w1, w2), indent=2))
     print(f"saved {suffix} to {outdir}")
 
 
