@@ -14,6 +14,12 @@ Config file format (python):
     model = "sonnet"               # optional, model alias or full name (e.g. 'opus', 'claude-sonnet-4-5-20250929')
     proj_dir = "/path/to/seed"     # optional, seed project for e2e
     feat_generalize = "..."        # optional, prompt to extract CLAUDE.md
+
+Implementation notes:
+    - Uses --output-format=stream-json + --verbose for token-level progress (not turn-level)
+    - Claude sessions tied to cwd; resume followups in same sandbox, split outputs later
+    - Incremental saves: mv_sandbox after each step with dirs_exist_ok=True
+    - Logs: stdout/stderr to tmpdir/logs/ for debugging; stderr printed on error
 """
 import argparse
 import json
@@ -151,6 +157,10 @@ def run_claude(prompt: str, cwd: Path, session_id: str | None = None, logdir: Pa
                 stderr_log.write_text(stderr_text)
 
             if proc.returncode != 0:
+                print(f"\n[error] claude command failed with exit code {proc.returncode}")
+                print(f"[error] command: {' '.join(cmd)}")
+                if stderr_text:
+                    print(f"[error] stderr:\n{stderr_text}")
                 raise subprocess.CalledProcessError(proc.returncode, cmd, stdout_text, stderr_text)
 
             pbar.set_postfix_str("complete")
@@ -169,12 +179,6 @@ def run_claude(prompt: str, cwd: Path, session_id: str | None = None, logdir: Pa
                 continue
 
     raise ValueError("No valid JSON result found in output")
-
-def check_writes_contained(diffs: dict[str, str], cwd: Path) -> tuple[dict[str, str], list[str]]:
-    """Post-hoc audit: returns (diffs, escaped_paths). settings.json is the actual guard."""
-    resolved_cwd = cwd.resolve()
-    outside = [p for p in diffs if not (cwd / p).resolve().is_relative_to(resolved_cwd)]
-    return diffs, outside
 
 def get_writes(session_id: str, cwd: Path) -> dict[str, str]:
     # TODO i am not sure this is 100% robust
@@ -198,8 +202,8 @@ def split_agents_diff(diffs: dict[str, str]) -> tuple[dict[str, str], str | None
 
 def get_vnext(outdir: Path) -> str:
     if not outdir.exists(): return "v0"
-    existing = [d.name for d in outdir.iterdir() if d.is_dir() and ".v" in d.name]
-    versions = [int(n.split(".v")[1]) for n in existing if n.split(".v")[1].isdigit()]
+    existing = [d for d in outdir.iterdir() if d.is_dir() and d.name.startswith("v")]
+    versions = [int(d.name[1:]) for d in existing if d.name[1:].isdigit()]
     return f"v{max(versions, default=-1) + 1}"
 
 
@@ -214,22 +218,8 @@ def setup_sandbox(d: Path, proj_dir: Path | None = None, claude_md: str | None =
     write_settings(d)
     return d
 
-
-def run_and_collect(prompt: str, cwd: Path, session_id: str | None = None,
-                    followup: str | None = None, logdir: Path | None = None, model: str | None = None) -> tuple[str, dict[str, str], str | None]:
-    """Run claude, optionally followup, return (session_id, writes, agents_content)."""
-    r = run_claude(prompt, cwd, session_id, logdir=logdir, model=model)
-    sid = r["session_id"]
-    if followup:
-        run_claude(followup, cwd, sid, logdir=logdir, model=model)
-    writes, esc = check_writes_contained(get_writes(sid, cwd), cwd)
-    if esc: print(f"[warn] writes escaped sandbox: {esc}")
-    writes, agents = split_agents_diff(writes)
-    return sid, writes, agents
-
-
-def mv_sanbox(base: Path, out: Path, session_id: str | None = None, flatten: bool = False) -> Path:
-    """move files to output directory. Returns output path."""
+def mv_sandbox(base: Path, out: Path, session_id: str | None = None, flatten: bool = False) -> Path:
+    """Move sandbox (entire tmpdir) to output directory. Returns output path."""
     # copy transcript if session_id provided
     if session_id:
         jsonl = session_jsonl(session_id)
@@ -307,7 +297,7 @@ def cmd_mv(args):
     """Move sandbox (entire tmpdir) to output directory."""
     base = Path(args.base).resolve()
     out = Path(args.out).resolve() if args.out else tk.xpdir("out/claudit/%y%m") / base.name
-    mv_sanbox(base, out, session_id=args.session_id, flatten=args.flatten)
+    mv_sandbox(base, out, session_id=args.session_id, flatten=args.flatten)
     print(f"moved {base} -> {out}")
 
 
@@ -340,21 +330,36 @@ def cmd_e2e(args):
     print(f"sandbox: {base}")
     print(f"logs: {logdir}")
 
-    print("\n[1/2] running norule...")
-    sid1, w1, agents = run_and_collect(prompt, setup_sandbox(base / "norule", proj_dir), followup=feat_gen, logdir=logdir, model=model)
-    print("\n[2/2] running yerule...")
-    sid2, w2, _ = run_and_collect(prompt, setup_sandbox(base / "yerule", proj_dir, agents), logdir=logdir, model=model)
-
-    # Move entire tmpdir to output (includes norule/, yerule/, logs/)
     outdir = tk.xpdir("out/claudit/%y%m")
     suffix = get_vnext(outdir)
-    out = mv_sanbox(base, outdir / suffix)
+    out = outdir / suffix
 
-    # Write CLAUDE.md and meta diff
-    (out / "CLAUDE.md").write_text(agents or "")
+    print("\n[1/2] running norule...")
+    norule_sandbox = setup_sandbox(base / "norule.step0", proj_dir)
+    r11 = run_claude(prompt, norule_sandbox, logdir=logdir, model=model)
+    sid1 = r11["session_id"]
+
+    out = mv_sandbox(base, out)
+    print(f"saved norule (step 1) to {out}")
+    print("generating CLAUDE.md...")
+
+    r12 = run_claude(feat_gen, norule_sandbox, sid1, logdir=logdir, model=model)
+    norule_sandbox = norule_sandbox.rename(norule_sandbox.with_suffix(".step1"))
+
+    # Get all writes and split out CLAUDE.md
+    w1 = get_writes(sid1, norule_sandbox)
+    w1, agents = split_agents_diff(w1)
+
+    print("\n[2/2] running yerule...")
+    yerule_sandbox = setup_sandbox(base / "yerule", proj_dir, agents)
+    r2 = run_claude(
+        prompt, yerule_sandbox, logdir=logdir, model=model)
+    sid2 = r2["session_id"]
+    w2 = get_writes(sid2, yerule_sandbox)
+    w2, _ = split_agents_diff(w2)
+    out = mv_sandbox(base, out)
     (out / "meta.json").write_text(json.dumps(meta_diff(w1, w2), indent=2))
-    print(f"saved {suffix} to {outdir}")
-
+    print(f"saved {suffix} to {out}")
 
 def main():
     parser = argparse.ArgumentParser(prog="claudit", description=__doc__,
