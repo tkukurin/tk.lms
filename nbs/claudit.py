@@ -218,15 +218,17 @@ def setup_sandbox(d: Path, proj_dir: Path | None = None, claude_md: str | None =
     write_settings(d)
     return d
 
+def copy_transcript(session_id: str, dest: Path) -> bool:
+    """Copy transcript for session_id to dest/transcript.jsonl. Returns True if copied."""
+    jsonl = session_jsonl(session_id)
+    if jsonl and jsonl.exists():
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copy(jsonl, dest / "transcript.jsonl")
+        return True
+    return False
+
 def mv_sandbox(base: Path, out: Path, session_id: str | None = None, flatten: bool = False) -> Path:
     """Move sandbox (entire tmpdir) to output directory. Returns output path."""
-    # copy transcript if session_id provided
-    if session_id:
-        jsonl = session_jsonl(session_id)
-        if jsonl:
-            out.mkdir(parents=True, exist_ok=True)
-            shutil.copy(jsonl, out / "transcript.jsonl")
-
     if flatten:
         # flatten: copy all files to out root
         out.mkdir(parents=True, exist_ok=True)
@@ -236,6 +238,10 @@ def mv_sandbox(base: Path, out: Path, session_id: str | None = None, flatten: bo
     else:
         # preserve structure: copy entire tmpdir
         shutil.copytree(base, out, dirs_exist_ok=True, ignore=shutil.ignore_patterns("settings.json", ".claude"))
+
+    # copy transcript if session_id provided (to specific subdir within out)
+    if session_id:
+        copy_transcript(session_id, out)
 
     return out
 
@@ -339,8 +345,9 @@ def cmd_e2e(args):
     r11 = run_claude(prompt, norule_sandbox, logdir=logdir, model=model)
     sid1 = r11["session_id"]
 
+    # Copy sandbox state (will save transcript in step1 after rename)
     out = mv_sandbox(base, out)
-    print(f"saved norule (step 1) to {out}")
+    print(f"saved norule (step 0) to {out}")
     print("generating CLAUDE.md...")
 
     r12 = run_claude(feat_gen, norule_sandbox, sid1, logdir=logdir, model=model)
@@ -357,7 +364,14 @@ def cmd_e2e(args):
     sid2 = r2["session_id"]
     w2 = get_writes(sid2, yerule_sandbox)
     w2, _ = split_agents_diff(w2)
+    
+    # Save final state with transcripts
+    # Note: norule.step0 and norule.step1 share sid1 transcript (same session, continued)
     out = mv_sandbox(base, out)
+    copy_transcript(sid1, out / "norule.step0")  # Initial prompt + CLAUDE.md gen
+    copy_transcript(sid1, out / "norule.step1")  # Same session, full transcript
+    copy_transcript(sid2, out / "yerule")        # Separate session with rules
+    
     (out / "meta.json").write_text(json.dumps(meta_diff(w1, w2), indent=2))
     print(f"saved {suffix} to {out}")
 
