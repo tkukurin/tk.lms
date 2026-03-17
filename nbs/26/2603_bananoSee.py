@@ -18,7 +18,7 @@ import tk
 for _name in ("GemResult", "EvalResult", "RunStats"):
     setattr(sys.modules[__name__], _name, type(_name, (), {}))
 
-cache = diskcache.Cache(tk.xpdir("out/banano2/cache"))
+cache = diskcache.Cache(tk.datadir / "out/bananogen/cache")
 
 # %%
 # ─── load all cached results ────────────────────────────────────────────────
@@ -27,9 +27,9 @@ def load_results() -> tuple[dict, dict]:
     """Load GemResults and EvalResults from cache. Returns (gen, eval) dicts."""
     gen, evl = {}, {}
     for key in cache.iterkeys():
-        if isinstance(key, str) and key.startswith("gem__"):
+        if isinstance(key, str) and key.startswith("gen2__"):
             gen[key] = cache[key]
-        elif isinstance(key, str) and key.startswith("eval__"):
+        elif isinstance(key, str) and key.startswith("eval2__"):
             evl[key] = cache[key]
     return gen, evl
 
@@ -39,22 +39,26 @@ rprint(f"[bold]{len(gen_results)}[/bold] gen results, [bold]{len(eval_results)}[
 # %%
 # ─── summary table ──────────────────────────────────────────────────────────
 
+def _get(obj, key, default=None):
+    """Get attr or dict key."""
+    return getattr(obj, key, None) or (obj.get(key, default) if isinstance(obj, dict) else default)
+
 def summary_table(gen: dict, evl: dict):
-    t = Table(title="Banano2 Cache Summary")
+    t = Table(title="Bananogen Cache Summary")
     t.add_column("trial")
-    t.add_column("images", justify="right")
+    t.add_column("has_img", justify="center")
     t.add_column("tokens", justify="right")
     t.add_column("lev_ratio", justify="right")
     t.add_column("font_match", justify="center")
     for key, res in sorted(gen.items()):
-        n_img = len(res.image_parts) if hasattr(res, "image_parts") else len(res.get("image_parts", []))
-        tok = res.total_tokens if hasattr(res, "total_tokens") else res.get("total_tokens", 0)
-        short_key = key.replace("gem__", "")
-        eval_key = f"eval__{short_key}"
+        has_img = "✓" if _get(res, "image_b64") else "✗"
+        tok = str(_get(res, "gen_tokens", 0))
+        short_key = key.replace("gen2__", "")
+        eval_key = f"eval2__{short_key}"
         ev = evl.get(eval_key)
-        lev = f"{ev.levenshtein_ratio:.2f}" if ev else "—"
-        fm = "✓" if ev and ev.font_match else ("✗" if ev else "—")
-        t.add_row(short_key, str(n_img), str(tok), lev, fm)
+        lev = f"{_get(ev, 'lev_ratio', 0):.2f}" if ev else "—"
+        fm = "✓" if ev and _get(ev, "font_match") else ("✗" if ev else "—")
+        t.add_row(short_key, has_img, tok, lev, fm)
     rprint(t)
 
 summary_table(gen_results, eval_results)
@@ -72,11 +76,10 @@ def show_images(gen: dict, filter_str: str | None = None, max_cols: int = 4):
 
     imgs = []
     for key, res in items:
-        parts = res.image_parts if hasattr(res, "image_parts") else res.get("image_parts", [])
-        for ip in parts:
-            data = ip["data"] if isinstance(ip, dict) else ip.data
-            img = Image.open(io.BytesIO(base64.b64decode(data)))
-            imgs.append((key.replace("gem__", ""), img))
+        b64 = _get(res, "image_b64", "")
+        if b64:
+            img = Image.open(io.BytesIO(base64.b64decode(b64)))
+            imgs.append((key.replace("gen2__", ""), img))
 
     if not imgs:
         rprint("[red]No images found[/red]")
@@ -104,6 +107,6 @@ def show_images(gen: dict, filter_str: str | None = None, max_cols: int = 4):
 
 
 # %%
-#show_images(gen_results, filter_str="billboard")
-show_images(gen_results, filter_str="serif")
+show_images(gen_results, filter_str="display")
+#show_images(gen_results, filter_str="serif")
 # %%
