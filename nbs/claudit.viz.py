@@ -360,21 +360,59 @@ class Viz:
         self.console.print(table)
 
     def meta_diff(self, meta: dict):
-        """Visualize meta diff between norule and yerule."""
-        table = Table(title="File Differences", show_header=True)
-        table.add_column("File", style="cyan")
-        table.add_column("Type", width=12)
-        table.add_column("Details", style="dim")
+        """Visualize meta diff between norule and yerule with detailed changes."""
+        table = Table(title="File Differences (norule.step1 vs yerule)", show_header=True)
+        table.add_column("File", style="cyan", no_wrap=True)
+        table.add_column("norule.step1", justify="right", style="red")
+        table.add_column("yerule", justify="right", style="green")
+        table.add_column("Change", style="yellow")
 
-        for filename, diff_data in meta.items():
+        for filename, diff_data in sorted(meta.items()):
             if "functions" in diff_data:
-                # python function diff
+                # Python function diff
                 stats = diff_data.get("stats", {})
-                details = f"norule: {stats.get('norule_fn_count', 0)} fns, yerule: {stats.get('yerule_fn_count', 0)} fns"
-                table.add_row(filename, "function diff", details)
+                norule_count = stats.get('norule_fn_count', 0)
+                yerule_count = stats.get('yerule_fn_count', 0)
+                
+                # Show function-level changes
+                fn_diff = diff_data.get("functions", {})
+                added = len([k for k, v in fn_diff.items() if v.get("added")])
+                removed = len([k for k, v in fn_diff.items() if v.get("removed")])
+                modified = len([k for k, v in fn_diff.items() if not v.get("added") and not v.get("removed")])
+                
+                change_desc = []
+                if added: change_desc.append(f"+{added} fn")
+                if removed: change_desc.append(f"-{removed} fn")
+                if modified: change_desc.append(f"~{modified} fn")
+                
+                table.add_row(
+                    filename,
+                    f"{norule_count} fns",
+                    f"{yerule_count} fns",
+                    ", ".join(change_desc) if change_desc else "no change"
+                )
             else:
-                # text diff
-                table.add_row(filename, "text diff", "content changed")
+                # Text diff - show line counts
+                norule_text = diff_data.get("norule", "")
+                yerule_text = diff_data.get("yerule", "")
+                
+                norule_lines = len(norule_text.splitlines()) if norule_text else 0
+                yerule_lines = len(yerule_text.splitlines()) if yerule_text else 0
+                
+                if norule_text and not yerule_text:
+                    change = "removed"
+                elif not norule_text and yerule_text:
+                    change = "added"
+                else:
+                    diff_lines = yerule_lines - norule_lines
+                    change = f"{diff_lines:+d} lines" if diff_lines != 0 else "modified"
+                
+                table.add_row(
+                    filename,
+                    f"{norule_lines} lines" if norule_text else "—",
+                    f"{yerule_lines} lines" if yerule_text else "—",
+                    change
+                )
 
         self.console.print(table)
 
@@ -387,26 +425,104 @@ class Viz:
         table.add_column("Metric", style="cyan")
         table.add_column(norule_label, justify="right", style="red")
         table.add_column(yerule_label, justify="right", style="green")
+        table.add_column("Δ", justify="right", style="yellow")
 
         # message counts
         norule_msgs = len(norule.transcript) if norule.transcript else 0
         yerule_msgs = len(yerule.transcript) if yerule.transcript else 0
-        table.add_row("Messages", str(norule_msgs), str(yerule_msgs))
+        table.add_row("Messages", str(norule_msgs), str(yerule_msgs), 
+                     f"{yerule_msgs - norule_msgs:+d}")
 
         # file counts
-        table.add_row("Files", str(len(norule.files)), str(len(yerule.files)))
+        norule_files = len(norule.files)
+        yerule_files = len(yerule.files)
+        table.add_row("Files", str(norule_files), str(yerule_files),
+                     f"{yerule_files - norule_files:+d}")
 
         # tool usage
         if norule.transcript and yerule.transcript:
             norule_tools = len(Filter.tools(norule.transcript))
             yerule_tools = len(Filter.tools(yerule.transcript))
-            table.add_row("Tool Uses", str(norule_tools), str(yerule_tools))
+            table.add_row("Tool Uses", str(norule_tools), str(yerule_tools),
+                         f"{yerule_tools - norule_tools:+d}")
 
             norule_code = len(Filter.code(norule.transcript))
             yerule_code = len(Filter.code(yerule.transcript))
-            table.add_row("Code Changes", str(norule_code), str(yerule_code))
+            table.add_row("Code Changes", str(norule_code), str(yerule_code),
+                         f"{yerule_code - norule_code:+d}")
 
         self.console.print(table)
+
+    def compare_three_runs(self, step0: RunData, step1: RunData, yerule: RunData):
+        """Compare norule.step0, norule.step1, and yerule runs side by side."""
+        table = Table(title=f"Three-Way Comparison: {step0.version}", show_header=True)
+        table.add_column("Metric", style="cyan")
+        table.add_column("norule.step0", justify="right", style="red")
+        table.add_column("norule.step1", justify="right", style="magenta")
+        table.add_column("yerule", justify="right", style="green")
+
+        # Message counts
+        step0_msgs = len(step0.transcript) if step0.transcript else 0
+        step1_msgs = len(step1.transcript) if step1.transcript else 0
+        yerule_msgs = len(yerule.transcript) if yerule.transcript else 0
+        table.add_row("Messages", str(step0_msgs), str(step1_msgs), str(yerule_msgs))
+
+        # File counts
+        table.add_row("Files", str(len(step0.files)), str(len(step1.files)), str(len(yerule.files)))
+
+        # Tool usage
+        if step0.transcript and step1.transcript and yerule.transcript:
+            step0_tools = len(Filter.tools(step0.transcript))
+            step1_tools = len(Filter.tools(step1.transcript))
+            yerule_tools = len(Filter.tools(yerule.transcript))
+            table.add_row("Tool Uses", str(step0_tools), str(step1_tools), str(yerule_tools))
+
+            step0_code = len(Filter.code(step0.transcript))
+            step1_code = len(Filter.code(step1.transcript))
+            yerule_code = len(Filter.code(yerule.transcript))
+            table.add_row("Code Changes", str(step0_code), str(step1_code), str(yerule_code))
+
+        self.console.print(table)
+
+        # File-level comparison
+        all_files = set(step0.files.keys()) | set(step1.files.keys()) | set(yerule.files.keys())
+        if all_files:
+            file_table = Table(title="File-Level Changes", show_header=True)
+            file_table.add_column("File", style="cyan", no_wrap=True)
+            file_table.add_column("step0", justify="right", style="red")
+            file_table.add_column("step1", justify="right", style="magenta")
+            file_table.add_column("yerule", justify="right", style="green")
+            file_table.add_column("Notes", style="dim")
+
+            for filename in sorted(all_files):
+                step0_content = step0.files.get(filename, "")
+                step1_content = step1.files.get(filename, "")
+                yerule_content = yerule.files.get(filename, "")
+
+                step0_lines = len(step0_content.splitlines()) if step0_content else 0
+                step1_lines = len(step1_content.splitlines()) if step1_content else 0
+                yerule_lines = len(yerule_content.splitlines()) if yerule_content else 0
+
+                # Determine change pattern
+                notes = []
+                if not step0_content and step1_content:
+                    notes.append("added in step1")
+                if not step0_content and not step1_content and yerule_content:
+                    notes.append("only in yerule")
+                if step1_content and yerule_content and step1_content != yerule_content:
+                    notes.append("differs")
+                if step1_content and yerule_content and step1_content == yerule_content:
+                    notes.append("same")
+
+                file_table.add_row(
+                    filename,
+                    f"{step0_lines}" if step0_lines else "—",
+                    f"{step1_lines}" if step1_lines else "—",
+                    f"{yerule_lines}" if yerule_lines else "—",
+                    ", ".join(notes) if notes else ""
+                )
+
+            self.console.print(file_table)
 
 # %% [markdown]
 """## Example Usage"""
@@ -438,8 +554,14 @@ if __name__ == "__main__":
         yerule = load_run(outdir, latest, "yerule")
         meta = load_meta(outdir, latest)
 
-        print("=== Comparison (norule.step1 vs yerule) ===")
+        print("=== Three-Way Comparison (step0 → step1 → yerule) ===")
+        viz.compare_three_runs(norule_step0, norule_step1, yerule)
+
+        print("\n=== Comparison (norule.step1 vs yerule) ===")
         viz.compare_runs(norule_step1, yerule)
+
+        print("\n=== Meta Diff (file-level changes) ===")
+        viz.meta_diff(meta)
 
         print("\n=== norule.step0 Conversation (initial run) ===")
         viz.convo(norule_step0, limit=10)
@@ -449,9 +571,6 @@ if __name__ == "__main__":
 
         print("\n=== yerule Tool Stats ===")
         viz.tool_stats(yerule)
-
-        print("\n=== Meta Diff (code changes) ===")
-        viz.meta_diff(meta)
 
         # Additional analysis examples
         print("\n=== Code Changes in norule.step1 ===")
