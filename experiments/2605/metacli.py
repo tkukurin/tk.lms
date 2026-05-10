@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import html
 import http.server
 import json
@@ -22,6 +23,7 @@ from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
 from pathlib import Path
+from tqdm import tqdm
 from typing import Any
 from typing import Literal
 from typing import cast
@@ -685,6 +687,222 @@ def write_trending_md(d: Path, aggs: list[VibeAggregate]) -> Path:
   return p
 
 
+# %% LLM vibe resolution
+
+def get_model_catalog(
+  records_path: Path, all_routes: bool = False,
+) -> list[dict[str, Any]]:
+  rows = read_data_file(records_path)
+  seen: set[str] = set()
+  out = []
+  for r in rows:
+    if not isinstance(r, dict): continue
+    if not all_routes and r.get("route") not in FIRST_PARTY: continue
+    if (key := r.get("model_key") or r.get("key")) in seen: continue
+    seen.add(key)
+    out.append({
+      "key": key, "route": r.get("route", ""), "raw_id": r.get("raw_id", ""),
+      "name": r.get("name", ""), "family": r.get("family", ""),
+      "aliases": r.get("aliases", []),
+    })
+  return out
+
+
+def get_resolve_items(signals: list[Any]) -> list[dict[str, Any]]:
+  return [{
+    "signal_id": str(i), "current_model_key": s.get("model_key", ""),
+    "source": s.get("source", ""), "text": s.get("text", ""),
+    "timestamp": s.get("timestamp", ""), "url": s.get("url", ""),
+  } for i, s in enumerate(signals) if isinstance(s, dict) and s.get("text")]
+
+
+def get_resolve_messages(
+  catalog: list[dict[str, Any]], batch: list[dict[str, Any]], min_conf: float,
+) -> list[dict[str, str]]:
+  system = (
+    "Map vibe comments to model catalog keys. Return strict JSON only. "
+    "Schema: {mappings:[{signal_id:string,resolved_model_keys:string[],"
+    "confidence:number,reason:string}]}. Only use catalog keys. Return at most "
+    "3 keys per signal; don't list route/wrapper variants. Use [] when "
+    f"ambiguous or confidence < {min_conf}."
+  )
+  return [{"role": "system", "content": system}, {"role": "user", "content":
+    json.dumps({"catalog": catalog, "signals": batch}, ensure_ascii=False)}]
+
+
+def get_token_count_value(x: Any) -> int:
+  if isinstance(x, dict): return int(x.get("total_tokens") or x.get("totalTokens"))
+  return int(getattr(x, "total_tokens", None) or getattr(x, "totalTokens"))
+
+
+def count_tokens(model: str, messages: list[dict[str, str]]) -> int | None:
+  import asyncio
+  import litellm
+  try:
+    return get_token_count_value(asyncio.run(litellm.acount_tokens(
+      model=model, messages=messages,
+    )))
+  except Exception as e:
+    print(f"warning: LiteLLM count_tokens endpoint failed: {e}", file=sys.stderr)
+  try: return int(litellm.token_counter(model=model, messages=messages))
+  except Exception as e:
+    print(f"warning: LiteLLM local token count failed: {e}", file=sys.stderr)
+    return None
+
+
+def get_usage_value(u: Any, *keys: str) -> int:
+  for k in keys:
+    v = u.get(k) if isinstance(u, dict) else getattr(u, k, None)
+    if v is not None: return int(v)
+  return 0
+
+
+def record_call(args: argparse.Namespace, stats: dict[str, Any]) -> None:
+  args.calls += 1
+  args.run_cost += stats["call_cost_usd"]
+  args.run_input_tokens += stats["input_tokens"]
+  args.run_output_tokens += stats["output_tokens"]
+  args.run_total_tokens += stats["total_tokens"]
+  row = {**stats, "run_cost_usd": args.run_cost,
+         "run_input_tokens": args.run_input_tokens,
+         "run_output_tokens": args.run_output_tokens,
+         "run_total_tokens": args.run_total_tokens}
+  with args.stats_path.open("a", encoding="utf-8") as f:
+    f.write(json.dumps(row) + "\n")
+  if args.pbar:
+    args.pbar.set_postfix_str(
+      f"call ${stats['call_cost_usd']:.4f} run ${args.run_cost:.4f} "
+      f"tok {stats['total_tokens']} cache {args.cache_hits}"
+    )
+
+
+def get_completion_json(
+  args: argparse.Namespace, messages: list[dict[str, str]], prompt_tokens: int | None,
+) -> dict[str, Any]:
+  import litellm
+  r = litellm.completion(
+    model=args.model, messages=messages, temperature=0,
+    response_format={"type": "json_object"},
+  )
+  u = getattr(r, "usage", {}) or {}
+  in_t = get_usage_value(u, "prompt_tokens", "input_tokens") or prompt_tokens or 0
+  out_t = get_usage_value(u, "completion_tokens", "output_tokens")
+  stats = {
+    "model": args.model, "input_tokens": in_t, "output_tokens": out_t,
+    "total_tokens": get_usage_value(u, "total_tokens") or in_t + out_t,
+    "call_cost_usd": float(litellm.completion_cost(completion_response=r) or 0),
+  }
+  record_call(args, stats)
+  return json.loads(r.choices[0].message.content or "{}")
+
+
+def sanitize_resolutions(
+  rows: list[dict[str, Any]], keys: set[str], max_keys: int,
+) -> list[dict[str, Any]]:
+  out = []
+  for r in rows:
+    xs = [k for k in r.get("resolved_model_keys", []) if k in keys]
+    if len(xs) > max_keys:
+      xs = []
+      r = {**r, "confidence": 0, "reason": "too many candidate keys"}
+    out.append({**r, "resolved_model_keys": xs})
+  return out
+
+
+def get_cache_path(args: argparse.Namespace, batch: list[dict[str, Any]]) -> Path:
+  payload = {"model": args.model, "catalog": args.catalog_hash,
+             "min_conf": args.min_confidence, "max_keys": args.max_keys,
+             "batch": batch}
+  key = hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+  return args.cache_dir / f"{key}.json"
+
+
+def get_cached(
+  args: argparse.Namespace, batch: list[dict[str, Any]],
+) -> list[dict[str, Any]] | None:
+  if args.dry_run or args.no_cache: return None
+  p = get_cache_path(args, batch)
+  if not p.exists(): return None
+  args.cache_hits += 1
+  if args.pbar:
+    args.pbar.set_postfix_str(
+      f"run ${args.run_cost:.4f} cache {args.cache_hits}"
+    )
+  return json.loads(p.read_text(encoding="utf-8"))
+
+
+def save_cache(
+  args: argparse.Namespace, batch: list[dict[str, Any]], rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+  if not args.dry_run and not args.no_cache:
+    args.cache_dir.mkdir(parents=True, exist_ok=True)
+    get_cache_path(args, batch).write_text(json.dumps(rows, ensure_ascii=False))
+  return rows
+
+
+def resolve_batch(args: argparse.Namespace, catalog: list[dict[str, Any]],
+                  batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+  if cached := get_cached(args, batch): return cached
+  keys = {m["key"] for m in catalog}
+  messages = get_resolve_messages(catalog, batch, args.min_confidence)
+  n = count_tokens(args.model, messages)
+  if n and n > args.max_tokens and len(batch) > 1:
+    mid = len(batch) // 2
+    return (resolve_batch(args, catalog, batch[:mid]) +
+            resolve_batch(args, catalog, batch[mid:]))
+  if n and n > args.max_tokens:
+    print(f"warning: one-signal batch has {n} tokens", file=sys.stderr)
+  if args.dry_run:
+    print(f"dry-run: {len(batch)} signals, {n or 'unknown'} tokens")
+    return []
+  try: data = get_completion_json(args, messages, n)
+  except Exception as e:
+    print(f"warning: resolver batch failed: {e}", file=sys.stderr)
+    if len(batch) > 1:
+      mid = len(batch) // 2
+      return (resolve_batch(args, catalog, batch[:mid]) +
+              resolve_batch(args, catalog, batch[mid:]))
+    rows = [{"signal_id": batch[0]["signal_id"], "resolved_model_keys": [],
+             "confidence": 0, "reason": f"resolver failed: {e}"}]
+    return save_cache(args, batch, rows)
+  rows = data.get("mappings", data if isinstance(data, list) else [])
+  return save_cache(args, batch, sanitize_resolutions(rows, keys, args.max_keys))
+
+
+def mv_resolved_signals(
+  signals: list[Any], resolutions: list[dict[str, Any]], min_conf: float,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+  by_id = {str(r.get("signal_id")): r for r in resolutions
+           if float(r.get("confidence", 0) or 0) >= min_conf}
+  resolved, unresolved = [], []
+  for i, s in enumerate(signals):
+    r, keys = by_id.get(str(i)), []
+    if r: keys = [k for k in r.get("resolved_model_keys", []) if k]
+    if not keys: unresolved.append(s); continue
+    for k in keys:
+      x = {**s, "model_key": k, "meta": {**s.get("meta", {}), "resolution": r}}
+      resolved.append(x)
+  return resolved, unresolved
+
+
+def write_jsonl(path: Path, rows: list[Any]) -> Path:
+  path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) +
+                  ("\n" if rows else ""), encoding="utf-8")
+  return path
+
+
+def write_resolution_outputs(
+  outdir: Path, signals: list[Any], resolutions: list[dict[str, Any]], min_conf: float,
+) -> dict[str, Path]:
+  outdir.mkdir(parents=True, exist_ok=True)
+  resolved, unresolved = mv_resolved_signals(signals, resolutions, min_conf)
+  return {
+    "resolutions": write_jsonl(outdir / "vibes_resolutions.jsonl", resolutions),
+    "resolved": write_jsonl(outdir / "vibes_signals_resolved.jsonl", resolved),
+    "unresolved": write_jsonl(outdir / "vibes_unresolved.jsonl", unresolved),
+  }
+
+
 # %% Viewer
 
 def read_data_file(path: Path | None) -> list[Any]:
@@ -826,6 +1044,47 @@ def cmd_vibes_ingest(args: argparse.Namespace) -> None:
   write_signals(args.run_dir, extra)
 
 
+def cmd_vibes_resolve(args: argparse.Namespace) -> None:
+  signals = read_data_file(args.signals_file)
+  if args.limit: signals = signals[:args.limit]
+  catalog = get_model_catalog(args.models_file, args.all_routes)
+  args.catalog_hash = hashlib.sha1(
+    json.dumps(catalog, sort_keys=True).encode(),
+  ).hexdigest()
+  args.cache_dir = args.cache_dir or args.outdir / "cache"
+  args.run_cost = 0.0
+  args.run_input_tokens = args.run_output_tokens = args.run_total_tokens = 0
+  args.calls = args.cache_hits = 0
+  args.pbar = None
+  run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+  args.stats_path = args.outdir / f"vibes_resolve_calls.{run_id}.jsonl"
+  args.summary_path = args.outdir / f"vibes_resolve_summary.{run_id}.json"
+  args.outdir.mkdir(parents=True, exist_ok=True)
+  args.stats_path.touch()
+  items = get_resolve_items(signals)
+  batches = [items[i:i + args.batch_size]
+             for i in range(0, len(items), args.batch_size)]
+  resolutions = []
+  with tqdm(batches, desc="resolve vibes", unit="batch") as pbar:
+    args.pbar = pbar
+    for b in pbar: resolutions.extend(resolve_batch(args, catalog, b))
+    args.pbar = None
+  paths = write_resolution_outputs(
+    args.outdir, signals, resolutions, args.min_confidence,
+  )
+  summary = {"signals": len(signals), "items": len(items),
+             "resolutions": len(resolutions), "calls": args.calls,
+             "cache_hits": args.cache_hits,
+             "input_tokens": args.run_input_tokens,
+             "output_tokens": args.run_output_tokens,
+             "total_tokens": args.run_total_tokens,
+             "cost_usd": round(args.run_cost, 6),
+             "stats": str(args.stats_path), "summary": str(args.summary_path),
+             "paths": {k: str(v) for k, v in paths.items()}}
+  args.summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+  print(json.dumps(summary, indent=2))
+
+
 def cmd_viewer(args: argparse.Namespace) -> None:
   records_path = args.records or get_latest(args.datadir, "modelsdev_records.jsonl")
   vibes_path = args.vibes or get_latest(args.datadir, "vibes_signals.jsonl")
@@ -866,6 +1125,21 @@ def build_parser() -> argparse.ArgumentParser:
   ingest.add_argument("run_dir", type=Path)
   ingest.add_argument("signals_file", type=Path)
   ingest.set_defaults(fn=cmd_vibes_ingest)
+  resolve = sub.add_parser("vibes-resolve", help="LLM-resolve vibe model keys")
+  resolve.add_argument("signals_file", type=Path)
+  resolve.add_argument("models_file", type=Path)
+  resolve.add_argument("--outdir", type=Path, default=Path("vibes-resolved"))
+  resolve.add_argument("--model", default="gemini/gemini-2.5-flash")
+  resolve.add_argument("--batch-size", type=int, default=100)
+  resolve.add_argument("--max-tokens", type=int, default=800_000)
+  resolve.add_argument("--min-confidence", type=float, default=0.65)
+  resolve.add_argument("--max-keys", type=int, default=3)
+  resolve.add_argument("--limit", type=int, default=0)
+  resolve.add_argument("--cache-dir", type=Path)
+  resolve.add_argument("--no-cache", action="store_true")
+  resolve.add_argument("--all-routes", action="store_true")
+  resolve.add_argument("--dry-run", action="store_true")
+  resolve.set_defaults(fn=cmd_vibes_resolve)
   viewer = sub.add_parser("viewer", help="serve viewer.html with latest data")
   viewer.add_argument("--records", type=Path)
   viewer.add_argument("--vibes", type=Path)
