@@ -162,7 +162,7 @@ input[type="file"] { display: none; }
   <div class="content" id="contentArea">
     <div class="drop-zone" id="dropZone">
       <p>Drop <strong>.jsonl</strong> / <strong>.csv</strong> / <strong>.json</strong> files here</p>
-      <p style="font-size:12px;color:var(--text2)">Or click <strong>⚙</strong> to open settings, or run <code>python 1003_serve_viewer.py</code></p>
+      <p style="font-size:12px;color:var(--text2)">Or click <strong>⚙</strong> to open settings, or run <code>python metacli.py viewer</code></p>
     </div>
   </div>
 
@@ -313,33 +313,45 @@ function parseAny(text) {
   return rows;
 }
 
+function setRecords(data, label) {
+  allRecords = data;
+  flatRows = data.map((r, i) => {
+    const f = (typeof r === "object") ? flattenRecord(r) : { value: r };
+    f._oidx = i;
+    return f;
+  });
+  initTable();
+  $("#recordsInfo").textContent = `${label} (${allRecords.length} records)`;
+  $("#slotRecords").classList.add("has-file");
+  updateStatus();
+}
+
 function loadRecords(text, filename) {
-  try {
-    const data = parseAny(text);
-    allRecords = data;
-    flatRows = data.map((r, i) => { const f = (typeof r === "object") ? flattenRecord(r) : { value: r }; f._oidx = i; return f; });
-    initTable();
-    $("#recordsInfo").textContent = `${filename} (${allRecords.length} records)`;
-    $("#slotRecords").classList.add("has-file");
-    updateStatus();
-  } catch (e) { alert("Failed to parse records: " + e.message); }
+  try { setRecords(parseAny(text), filename); }
+  catch (e) { alert("Failed to parse records: " + e.message); }
+}
+
+function setVibes(data, label) {
+  vibeSignals = data;
+  vibesByModel = {};
+  for (const s of vibeSignals) {
+    const k = s.model_key || "";
+    if (k) (vibesByModel[k] ??= []).push(s);
+  }
+  recomputeVibesCounts();
+  $("#vibesInfo").textContent = `${label || "server"} (${vibeSignals.length} signals)`;
+  $("#slotVibes").classList.add("has-file");
+  updateStatus();
+  if (flatRows.length) { renderMetrics(); applyFilters(); renderTable(); }
 }
 
 function loadVibes(text, filename) {
-  try {
-    vibeSignals = parseAny(text);
-    vibesByModel = {};
-    for (const s of vibeSignals) { const k = s.model_key || ""; (vibesByModel[k] ??= []).push(s); }
-    recomputeVibesCounts();
-    $("#vibesInfo").textContent = `${filename || "server"} (${vibeSignals.length} signals)`;
-    $("#slotVibes").classList.add("has-file");
-    updateStatus();
-    if (flatRows.length) { renderMetrics(); applyFilters(); renderTable(); }
-  } catch (e) { alert("Failed to parse vibes: " + e.message); }
+  try { setVibes(parseAny(text), filename); }
+  catch (e) { alert("Failed to parse vibes: " + e.message); }
 }
 
 function recomputeVibesCounts() {
-  for (const row of flatRows) row.vibes = findVibesForModel(row.key||"").length;
+  for (const row of flatRows) row.vibes = findVibesForModel(row.model_key || row.key || "").length;
 }
 
 function updateStatus() {
@@ -674,7 +686,13 @@ function renderTable() {
   }).join("") + "</tr>";
   thead.innerHTML = hdr;
   thead.querySelectorAll("th").forEach(th => {
-    th.addEventListener("click", e => { if (e.button===0) { sortCol=th.dataset.col; sortAsc = sortCol===th.dataset.col ? !sortAsc : true; doSort(); }});
+    th.addEventListener("click", e => {
+      if (e.button !== 0) return;
+      const col = th.dataset.col;
+      sortAsc = sortCol === col ? !sortAsc : true;
+      sortCol = col;
+      doSort();
+    });
   });
 
   const start = currentPage * pageSize;
@@ -696,7 +714,9 @@ function renderTable() {
     });
   });
   renderPagination();
-  statusbar.innerHTML = `<span>Showing ${start+1}–${Math.min(start+pageSize, filteredRows.length)} of ${filteredRows.length}</span>`;
+  const first = filteredRows.length ? start + 1 : 0;
+  const last = Math.min(start + pageSize, filteredRows.length);
+  statusbar.innerHTML = `<span>Showing ${first}–${last} of ${filteredRows.length}</span>`;
 }
 
 function renderPagination() {
@@ -722,7 +742,7 @@ function showDetail(idx) {
   const title = flat.name || flat.raw_id || flat.key || rec.name || rec.raw_id || rec.key || `Record ${idx}`;
   $("#detailTitle").textContent = title;
 
-  const modelKey = flat.key || rec.key || "";
+  const modelKey = flat.model_key || rec.model_key || flat.key || rec.key || "";
   const vibes = findVibesForModel(modelKey);
   let html = '';
   html += collapsePanel("Vibes", vibes.length, true, renderVibes(vibes), "vibes");
@@ -803,6 +823,24 @@ if (prefs.detailWidth) detailPanel.style.width = prefs.detailWidth;
 // -- Utils --
 function escHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(()=>fn(...a), ms); }; }
+
+async function loadServerData() {
+  if (!location.protocol.startsWith("http")) return;
+  try {
+    const [recordsRes, vibesRes] = await Promise.all([
+      fetch("/api/records"),
+      fetch("/api/vibes"),
+    ]);
+    const records = recordsRes.ok ? await recordsRes.json() : [];
+    const vibes = vibesRes.ok ? await vibesRes.json() : [];
+    if (records.length) setRecords(records, "server");
+    if (vibes.length) setVibes(vibes, "server");
+  } catch (e) {
+    console.warn("No server data available", e);
+  }
+}
+
+loadServerData();
 
 // -- Keyboard --
 document.addEventListener("keydown", e => {

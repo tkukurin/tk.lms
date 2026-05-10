@@ -147,7 +147,115 @@ Numeric tolerances:
 - Limits: exact for hard output/context limits; allow documented route-specific reductions.
 - Dates: exact for release/deprecation; missing dates are separate from conflicts.
 
-### Step 6: Produce reviewable reports
+### Step 6: Collect user vibes
+
+The technical metadata tells you what a model *can* do and what it costs.
+User vibes tell you whether it *actually works well* for real tasks — and
+whether the crowd thinks it's getting better or worse over time.
+
+This is a different kind of data: subjective, temporal, noisy, and
+aggregated from many sources. It should NOT live inside `NormalizedRecord`.
+Instead, introduce a parallel signal type that links to models via the same
+`key`/`underlying_key` identity system.
+
+#### Data model
+
+```python
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+Sentiment = Literal["positive", "negative", "neutral", "mixed"]
+VibeSource = Literal[
+    "twitter", "reddit", "hackernews", "discord",
+    "blog", "benchmark", "changelog", "manual",
+]
+VibeDimension = Literal[
+    "overall", "coding", "reasoning", "instruction_following",
+    "creativity", "speed", "reliability", "cost_value",
+    "regression",  # "it got worse"
+]
+
+@dataclass
+class VibeSignal:
+    """One observation: a tweet, post, thread, benchmark note, etc."""
+    model_key: str                          # links to NormalizedRecord.key or underlying_key
+    source: VibeSource
+    sentiment: Sentiment
+    dimensions: list[VibeDimension] = field(default_factory=list)
+    intensity: float = 0.0                  # -1.0 (very negative) to +1.0 (very positive)
+    text: str = ""                          # original snippet (truncated)
+    author: str = ""                        # handle/username, empty if anonymous
+    author_credibility: float = 0.5         # 0=unknown, 1=known-expert/benchmarker
+    url: str = ""                           # source URL
+    timestamp: str = ""                     # ISO 8601
+    engagement: dict[str, int] = field(default_factory=dict)  # likes, retweets, replies
+    meta: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class VibeAggregate:
+    """Rolled-up sentiment per model per time window."""
+    model_key: str
+    window_start: str                       # ISO date
+    window_end: str
+    n_signals: int = 0
+    mean_intensity: float = 0.0
+    sentiment_dist: dict[Sentiment, int] = field(default_factory=dict)
+    top_dimensions: list[VibeDimension] = field(default_factory=list)
+    trending: Literal["up", "down", "stable", "unknown"] = "unknown"
+    credibility_weighted_intensity: float = 0.0  # weight by author_credibility
+    notable_signals: list[str] = field(default_factory=list)  # URLs of high-engagement signals
+```
+
+#### Design principles
+
+- **Separate storage**: vibes go in `data/out/model-meta-crawler/<run>/vibes/`,
+  not mixed with normalized technical records.
+- **Link via identity**: the `model_key` field uses the same canonicalization
+  from Step 4. Mapping "claude sonnet" in a tweet to
+  `anthropic/claude-sonnet-4-20250514` is the hard part — reuse alias maps.
+- **Temporal first-class**: every signal has a timestamp; aggregates are
+  windowed (daily/weekly). Vibes decay — a rave review from 3 months ago
+  matters less than this week's complaints.
+- **Credibility weighting**: a known ML researcher or benchmark operator's
+  signal > random account. Start with manual tiers, automate later.
+- **Dimension tagging**: "coding is worse" maps to `["coding", "regression"]`;
+  "fastest model I've used" maps to `["speed"]`. This lets you cross-reference
+  vibes against technical capabilities.
+- **No ground truth**: unlike technical metadata, vibes have no "correct" value.
+  Report distributions and trends, not discrepancies.
+
+#### Sources (initial)
+
+- **Twitter/X**: search for model names + sentiment keywords; filter by
+  engagement thresholds to reduce noise. Use API or scraping (nitter-style).
+- **Reddit** (r/LocalLLaMA, r/ChatGPT, r/MachineLearning): post/comment
+  sentiment about specific models.
+- **Hacker News**: comments on model release/benchmark threads.
+- **Benchmark changelogs**: when Chatbot Arena, LiveBench, or SWE-bench
+  publish new results, the relative position change *is* a vibe signal.
+- **Manual/curated**: your own notes or high-signal threads you bookmark.
+
+#### Entity resolution challenge
+
+Mapping informal model mentions to canonical keys is harder than repo parsing:
+- "sonnet" → which version? Use recency heuristic + context.
+- "gpt5" vs "gpt-5" vs "o3" — need fuzzy mention matcher.
+- Nicknames/memes ("Claude the Coder") — maintain a slang alias map.
+- Multi-model comparisons ("sonnet > opus for coding") yield signals for both.
+
+Start with exact/substring matching against the alias map from Step 4,
+plus a manual review queue for unresolved mentions.
+
+#### Outputs
+
+- `vibes_signals.jsonl` — raw individual signals with provenance.
+- `vibes_weekly.csv` — per-model weekly aggregates.
+- `vibes_trending.md` — human-readable "what's hot / what's not" summary.
+- Join with `normalized_records.jsonl` on `model_key` for the viewer:
+  show technical facts + crowd sentiment side by side.
+
+### Step 7: Produce reviewable reports
 
 Outputs for each run:
 
@@ -166,6 +274,7 @@ Every report row should include source file/API provenance so a maintainer can o
 - Phase 2: add OpenCode consumer-level validation and Models.dev API-vs-repo checks.
 - Phase 3: historical lag analysis with PyDriller over the last 90 days or last N metadata-touching commits.
 - Phase 4: provider-doc spot checks for a handpicked set of high-value models.
+- Phase 5: vibes collection from Twitter + Reddit for focus model families; weekly aggregates; viewer integration.
 
 Initial model families for manual validation:
 
@@ -179,13 +288,15 @@ Initial model families for manual validation:
 
 ## Decisions
 
-- **D1: Treat Models.dev as a source, not ground truth** — OpenCode uses it internally, but the crawler’s purpose is to detect disagreement; no source should be hard-coded as correct.
+- **D1: Treat Models.dev as a source, not ground truth** — OpenCode uses it internally, but the crawler's purpose is to detect disagreement; no source should be hard-coded as correct.
 - **D2: Store raw and normalized records** — discrepancies need auditability and parser debugging.
 - **D3: Keep provider route separate from underlying model** — wrappers legitimately change costs, limits, and capabilities.
 - **D4: Use PyDriller for history, direct parsers for snapshots** — PyDriller is ideal for commit/event extraction; source-specific parsers are cleaner for current-state normalization.
 - **D5: Start with static files and public APIs** — avoids API keys and makes the first crawler reproducible.
 - **D6: Prefer explicit alias maps over fuzzy matching** — fuzzy identity matching is useful for candidates but too risky for final discrepancies.
 - **D7: Save after each major step** — raw fetch, normalized records, comparisons, and reports should be persisted independently for post-mortem debugging.
+- **D8: Keep vibes separate from technical metadata** — `NormalizedRecord` stays factual; `VibeSignal` is a parallel data stream joined on `model_key`. No schema changes needed to the existing record type.
+- **D9: Vibes are distributions, not verdicts** — report sentiment distributions and trends; never present aggregated vibes as factual claims about model quality.
 
 ## Success criteria
 
@@ -196,6 +307,9 @@ Initial model families for manual validation:
 - [ ] Recover PyDriller change timelines for at least two repositories over a bounded period.
 - [ ] Identify at least 10 actionable discrepancies or confirm low discrepancy rate with supporting CSV evidence.
 - [ ] Keep false-positive rate under 20% on a manual review sample of 50 findings.
+- [ ] Collect vibes for at least 10 focus models over a 2-week window.
+- [ ] Resolve ≥80% of model mentions to canonical keys without manual intervention.
+- [ ] Produce a weekly vibes summary joinable with technical metadata in the viewer.
 
 ## Risks and mitigations
 
@@ -204,10 +318,13 @@ Initial model families for manual validation:
 - Public APIs may change between runs. Mitigation: persist raw API responses with timestamps.
 - Repositories may be large. Mitigation: shallow clone for snapshots; PyDriller path filters and bounded date windows for history.
 - Some differences are legitimate provider-specific behavior. Mitigation: model comparisons should distinguish first-party, wrapper, region, and tier variants.
+- Vibe signals are noisy and biased toward vocal minorities. Mitigation: credibility weighting, engagement thresholds, and always reporting N alongside aggregates.
+- Model mention resolution is ambiguous ("sonnet" could be any version). Mitigation: recency heuristic + context window; unresolved mentions go to review queue, not auto-assigned.
+- Twitter/X API access is unstable and expensive. Mitigation: support multiple collection methods (API, RSS, manual paste); degrade gracefully to fewer sources.
 
 ## Next implementation slice
 
-1. Add a small Python package/module for `model_meta_crawler` under `src/tk/` or a single experiment script under `experiments/2605/1001_collect_model_meta.py`.
+1. Keep the experiment entrypoint consolidated in `experiments/2605/metacli.py`; split into `src/tk/` only when reuse justifies it.
 2. Add `pydriller` plus TOML/JS parsing dependencies if missing.
 3. Implement adapters for Models.dev API, LiteLLM JSON, and Pi generated registry first.
 4. Emit normalized JSONL and a minimal `discrepancies.csv` for the initial model-family whitelist.
