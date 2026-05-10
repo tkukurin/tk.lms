@@ -15,52 +15,47 @@
 html, body { height: 100%; font-family: var(--font); font-size: 13px; color: var(--text); background: var(--bg); }
 body { display: flex; flex-direction: column; overflow: hidden; }
 
-/* Top bar */
-.topbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.topbar h1 { font-size: 15px; font-weight: 600; white-space: nowrap; }
-.metrics { display: flex; gap: 16px; margin-left: 24px; }
-.metric { display: flex; flex-direction: column; align-items: center; }
-.metric-val { font-size: 16px; font-weight: 600; color: var(--accent); }
-.metric-lbl { font-size: 11px; color: var(--text2); }
-.topbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-.btn { padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); cursor: pointer; font-size: 12px; color: var(--text); }
+.topbar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.topbar h1 { font-size: 14px; font-weight: 600; white-space: nowrap; }
+.search-wrap { flex: 1; max-width: 600px; position: relative; }
+.search-wrap input { width: 100%; padding: 6px 10px 6px 28px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; background: var(--bg); }
+.search-wrap input:focus { outline: none; border-color: var(--accent); }
+.search-wrap .icon { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--text2); pointer-events: none; }
+.search-help { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; font-size: 11px; color: var(--text2); z-index: 100; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.1); line-height: 1.6; }
+.search-wrap input:focus ~ .search-help { display: block; }
+.search-help kbd { background: var(--badge); padding: 1px 4px; border-radius: 3px; font-family: var(--font); }
+.metrics { display: flex; gap: 14px; margin-left: 12px; }
+.metric { display: flex; align-items: baseline; gap: 4px; }
+.metric-val { font-size: 13px; font-weight: 600; color: var(--accent); }
+.metric-lbl { font-size: 10px; color: var(--text2); }
+.topbar-right { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.btn { padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); cursor: pointer; font-size: 11px; color: var(--text); }
 .btn:hover { background: var(--hover); }
 .btn-accent { background: var(--accent); color: #fff; border-color: var(--accent); }
-.btn-accent:hover { opacity: 0.9; }
 
-/* Layout */
 .main { display: flex; flex: 1; overflow: hidden; }
-.sidebar { width: 240px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
-.sidebar.hidden { display: none; }
 .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
-/* Sidebar controls */
-.filter-group label { display: block; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-.filter-group input, .filter-group select { width: 100%; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; background: var(--bg); }
-.filter-group select[multiple] { height: 90px; }
-.chip-container { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
-.chip { padding: 2px 8px; border-radius: 12px; background: var(--badge); font-size: 11px; cursor: pointer; user-select: none; }
-.chip.active { background: var(--accent); color: #fff; }
-
-/* Table */
 .table-wrap { flex: 1; overflow: auto; position: relative; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: auto; }
 thead { position: sticky; top: 0; z-index: 2; }
-thead th { background: var(--surface); padding: 7px 10px; text-align: left; font-weight: 600; border-bottom: 2px solid var(--border); white-space: nowrap; cursor: pointer; user-select: none; }
+thead th { background: var(--surface); padding: 6px 10px; text-align: left; font-weight: 600; border-bottom: 2px solid var(--border); white-space: nowrap; cursor: pointer; user-select: none; }
 thead th:hover { background: var(--hover); }
 thead th .sort-arrow { margin-left: 4px; font-size: 10px; color: var(--text2); }
 thead th .sort-arrow.active { color: var(--accent); }
 tbody tr { border-bottom: 1px solid var(--border); }
-tbody tr:hover { background: var(--hover); }
+tbody tr:hover { background: var(--hover); cursor: pointer; }
 tbody tr.selected { background: var(--selected); }
-tbody td { padding: 5px 10px; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+tbody td { padding: 4px 10px; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
 
-/* Detail panel */
-.detail-panel { width: 420px; flex-shrink: 0; background: var(--surface); border-left: 1px solid var(--border); overflow-y: auto; padding: 0; display: none; }
-.detail-panel.open { display: block; }
-.detail-panel h3 { font-size: 13px; padding: 10px 12px 6px; margin: 0; }
-.detail-panel pre { font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; margin: 0 12px 8px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 40vh; overflow-y: auto; }
+/* Detail panel — resizable */
+.detail-panel { width: 420px; min-width: 200px; max-width: 70vw; flex-shrink: 0; background: var(--surface); border-left: 1px solid var(--border); overflow-y: auto; padding: 0; display: none; position: relative; }
+.detail-panel.open { display: flex; flex-direction: column; }
+.detail-panel h3 { font-size: 13px; padding: 10px 12px 6px; margin: 0; flex-shrink: 0; }
+.detail-content { flex: 1; overflow-y: auto; }
+.resize-handle { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; z-index: 5; }
+.resize-handle:hover, .resize-handle.active { background: var(--accent); opacity: 0.3; }
 
 /* Collapsible panels */
 .collapse-panel { border-bottom: 1px solid var(--border); }
@@ -83,77 +78,74 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .sent-negative { border-left: 3px solid #c62828; }
 .sent-mixed { border-left: 3px solid #f57c00; }
 .sent-neutral { border-left: 3px solid var(--border); }
-.vibe-summary { padding: 8px 12px; font-size: 11px; color: var(--text2); line-height: 1.5; }
+.vibe-summary { padding: 8px 0; font-size: 11px; color: var(--text2); line-height: 1.5; }
 .vibe-summary strong { color: var(--text); }
 
+/* Context menu */
+.ctx-menu { position: fixed; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 4px 12px rgba(0,0,0,0.12); padding: 4px 0; z-index: 1000; min-width: 160px; font-size: 12px; }
+.ctx-menu-item { padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.ctx-menu-item:hover { background: var(--hover); }
+.ctx-menu-item.sep { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 9px; }
+.ctx-menu-item kbd { margin-left: auto; font-size: 10px; color: var(--text2); }
+
 /* Status bar */
-.statusbar { padding: 4px 16px; background: var(--surface); border-top: 1px solid var(--border); font-size: 11px; color: var(--text2); flex-shrink: 0; display: flex; gap: 16px; }
+.statusbar { padding: 4px 16px; background: var(--surface); border-top: 1px solid var(--border); font-size: 11px; color: var(--text2); flex-shrink: 0; display: flex; gap: 16px; align-items: center; }
 
 /* Drop zone */
 .drop-zone { flex: 1; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; color: var(--text2); }
 .drop-zone.active { background: var(--selected); }
 .drop-zone p { font-size: 14px; }
-.drop-zone .hint { font-size: 12px; }
-input[type="file"] { display: none; }
-
-/* Filter row */
-.filter-row th { padding: 3px 4px; background: var(--surface); border-bottom: 1px solid var(--border); }
-.filter-row input { width: 100%; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 11px; }
 
 /* Pagination */
-.pagination { display: flex; align-items: center; gap: 8px; padding: 6px 16px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
-.pagination select { padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; }
+.pagination { display: flex; align-items: center; gap: 8px; padding: 5px 16px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
+.pagination select { padding: 2px 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 11px; }
+
+/* Active filters bar */
+.filters-bar { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 16px; background: var(--bg); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.filters-bar:empty { display: none; }
+.filter-tag { display: flex; align-items: center; gap: 4px; padding: 2px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; font-size: 11px; }
+.filter-tag .remove { cursor: pointer; color: var(--text2); font-weight: bold; }
+.filter-tag .remove:hover { color: #c62828; }
+
+input[type="file"] { display: none; }
 </style>
 </head>
 <body>
 
 <div class="topbar">
-  <h1>Models.dev Viewer</h1>
+  <h1>Models.dev</h1>
+  <div class="search-wrap">
+    <span class="icon">⌕</span>
+    <input type="text" id="searchInput" placeholder="Search… (col:value for column filter, e.g. route:openai)">
+    <div class="search-help">
+      <kbd>text</kbd> search all columns &nbsp;
+      <kbd>col:value</kbd> filter column &nbsp;
+      <kbd>vibes:>0</kbd> numeric filter &nbsp;
+      <kbd>context:>100000</kbd> numeric &nbsp;
+      Press <kbd>Enter</kbd> to apply, <kbd>Esc</kbd> to clear
+    </div>
+  </div>
   <div class="metrics" id="metrics"></div>
   <div class="topbar-right">
-    <button class="btn" id="toggleSidebar">☰ Filters</button>
-    <button class="btn" id="toggleDetail">Detail ▸</button>
-    <label class="btn btn-accent" for="fileInput">Open File</label>
+    <label class="btn btn-accent" for="fileInput">Open</label>
     <input type="file" id="fileInput" accept=".json,.jsonl,.csv" multiple>
   </div>
 </div>
 
-<div class="main">
-  <div class="sidebar" id="sidebar">
-    <div class="filter-group">
-      <label>Search (all columns)</label>
-      <input type="text" id="searchInput" placeholder="type to filter…">
-    </div>
-    <div class="filter-group">
-      <label>Route</label>
-      <select id="routeFilter" multiple></select>
-    </div>
-    <div class="filter-group">
-      <label>Capabilities</label>
-      <div class="chip-container" id="capChips"></div>
-    </div>
-    <div class="filter-group">
-      <label>Min Context</label>
-      <input type="number" id="minContext" placeholder="0" min="0" step="1000">
-    </div>
-    <div class="filter-group">
-      <label>Columns</label>
-      <select id="colSelect" multiple></select>
-    </div>
-    <button class="btn" id="resetBtn" style="margin-top:auto;">Reset Filters</button>
-  </div>
+<div class="filters-bar" id="filtersBar"></div>
 
+<div class="main">
   <div class="content" id="contentArea">
     <div class="drop-zone" id="dropZone">
-      <p>Drop a <strong>.jsonl</strong>, <strong>.csv</strong>, or <strong>.json</strong> file here</p>
-      <p class="hint">Or click "Open File" above</p>
-      <p class="hint">Expects output from <code>1001_collect_model_meta.py</code></p>
+      <p>Drop <strong>.jsonl</strong> / <strong>.csv</strong> / <strong>.json</strong> files here</p>
+      <p style="font-size:12px;color:var(--text2)">Or use <code>python 1003_serve_viewer.py</code> to auto-load</p>
     </div>
   </div>
 
   <div class="detail-panel" id="detailPanel">
+    <div class="resize-handle" id="resizeHandle"></div>
     <h3 id="detailTitle">Record</h3>
-    <div id="detailContent"></div>
+    <div class="detail-content" id="detailContent"></div>
   </div>
 </div>
 
@@ -161,460 +153,410 @@ input[type="file"] { display: none; }
   <span>No file loaded</span>
 </div>
 
+<div class="ctx-menu" id="ctxMenu" style="display:none"></div>
+
 <script>
 "use strict";
 
 const PAGE_SIZE_OPTIONS = [50, 100, 200, 500, 1000];
 const DEFAULT_COLS = [
   "route","raw_id","name","family","context","output",
-  "input_cost","output_cost","tools","structured_output","reasoning","modalities"
+  "input_cost","output_cost","vibes","tools","structured_output","reasoning","modalities"
 ];
-const CAP_FIELDS = ["tools","structured_output","reasoning","prompt_cache"];
-const NUM_FIELDS = new Set(["context","input","output","input_cost","output_cost","cache_read","cache_write"]);
+const NUM_FIELDS = new Set(["context","input","output","input_cost","output_cost","cache_read","cache_write","vibes"]);
 
-let allRecords = [];   // full JSONL records (with nested data)
-let flatRows = [];     // flattened rows for the table
-let filteredRows = []; // after filters
-let columns = [];      // all available columns
-let visibleCols = [];  // currently shown
+// -- Prefs --
+const PREFS_KEY = "viewer_prefs_v2";
+function loadPrefs() { try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch { return {}; } }
+function savePrefs(patch) { const p = { ...loadPrefs(), ...patch }; localStorage.setItem(PREFS_KEY, JSON.stringify(p)); return p; }
+let prefs = loadPrefs();
+
+let allRecords = [], flatRows = [], filteredRows = [];
+let columns = [], visibleCols = [];
 let sortCol = null, sortAsc = true;
 let currentPage = 0, pageSize = 100;
 let selectedIdx = -1;
-let colFilters = {};   // per-column inline filters
-let activeCaps = new Set();
-let vibeSignals = [];  // loaded vibes
-let vibesByModel = {}; // model_key -> [VibeSignal]
+let vibeSignals = [], vibesByModel = {};
+let activeFilters = []; // [{type:'col'|'text'|'numeric', col?, op?, val}]
 
-// DOM refs
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
-const dropZone = $("#dropZone"), contentArea = $("#contentArea");
-const sidebar = $("#sidebar"), detailPanel = $("#detailPanel");
-const searchInput = $("#searchInput"), routeFilter = $("#routeFilter");
-const minCtxInput = $("#minContext"), colSelect = $("#colSelect");
-const metricsDiv = $("#metrics"), statusbar = $("#statusbar");
+const contentArea = $("#contentArea"), detailPanel = $("#detailPanel");
+const searchInput = $("#searchInput"), metricsDiv = $("#metrics");
+const statusbar = $("#statusbar"), filtersBar = $("#filtersBar");
+const ctxMenu = $("#ctxMenu");
 
 // -- File loading --
-$("#fileInput").addEventListener("change", e => {
-  for (const f of e.target.files) loadFile(f);
-});
-dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("active"); });
-dropZone.addEventListener("dragleave", () => dropZone.classList.remove("active"));
-dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("active"); for (const f of e.dataTransfer.files) loadFile(f); });
-$("#toggleSidebar").addEventListener("click", () => sidebar.classList.toggle("hidden"));
-$("#toggleDetail").addEventListener("click", () => detailPanel.classList.toggle("open"));
-$("#resetBtn").addEventListener("click", resetFilters);
+$("#fileInput").addEventListener("change", e => { for (const f of e.target.files) loadFile(f); });
+document.addEventListener("dragover", e => e.preventDefault());
+document.addEventListener("drop", e => { e.preventDefault(); for (const f of e.dataTransfer.files) loadFile(f); });
 
 function loadFile(file) {
   const reader = new FileReader();
   reader.onload = () => {
-    const text = reader.result;
-    const name = file.name.toLowerCase();
-    // Detect vibes file
-    if (name.includes("vibes") || name.includes("signal")) {
-      loadVibes(text, name); return;
-    }
+    const text = reader.result, name = file.name.toLowerCase();
+    if (name.includes("vibes") || name.includes("signal")) { loadVibes(text); return; }
     if (name.endsWith(".jsonl")) parseJSONL(text);
     else if (name.endsWith(".csv")) parseCSV(text);
     else if (name.endsWith(".json")) parseJSON(text);
-    else { alert("Unsupported file type. Use .jsonl, .csv, or .json"); return; }
     updateStatus();
   };
   reader.readAsText(file);
 }
 
-function loadVibes(text, name) {
-  const lines = text.trim().split("\n").filter(l => l.trim());
-  vibeSignals = lines.map(l => JSON.parse(l));
+function loadVibes(text) {
+  vibeSignals = text.trim().split("\n").filter(l => l.trim()).map(l => JSON.parse(l));
   vibesByModel = {};
-  for (const s of vibeSignals) {
-    const k = s.model_key || "";
-    if (!vibesByModel[k]) vibesByModel[k] = [];
-    vibesByModel[k].push(s);
-  }
+  for (const s of vibeSignals) { const k = s.model_key||""; (vibesByModel[k] ??= []).push(s); }
+  recomputeVibesCounts();
   updateStatus();
+  if (flatRows.length) { applyFilters(); renderTable(); }
+}
+
+function recomputeVibesCounts() {
+  for (const row of flatRows) row.vibes = findVibesForModel(row.key||"").length;
 }
 
 function updateStatus() {
-  const parts = [`${allRecords.length} records`];
-  if (vibeSignals.length) parts.push(`${vibeSignals.length} vibes (${Object.keys(vibesByModel).length} models)`);
-  statusbar.innerHTML = `<span>${parts.join(" · ")}</span>`;
+  const parts = [];
+  if (allRecords.length) parts.push(`${allRecords.length} records`);
+  if (vibeSignals.length) parts.push(`${vibeSignals.length} vibes`);
+  statusbar.innerHTML = `<span>${parts.join(" · ") || "No file loaded"}</span>`;
 }
 
 function parseJSONL(text) {
-  const lines = text.trim().split("\n").filter(l => l.trim());
-  allRecords = lines.map(l => JSON.parse(l));
+  allRecords = text.trim().split("\n").filter(l=>l.trim()).map(l=>JSON.parse(l));
   flatRows = allRecords.map(flattenRecord);
   initTable();
 }
-
 function parseCSV(text) {
-  const lines = text.trim().split("\n");
-  const headers = parseCSVLine(lines[0]);
-  flatRows = [];
-  allRecords = [];
-  for (let i = 1; i < lines.length; i++) {
-    const vals = parseCSVLine(lines[i]);
-    const row = {};
-    headers.forEach((h, j) => row[h] = vals[j] || "");
-    flatRows.push(row);
-    allRecords.push(row);
+  const lines = text.trim().split("\n"), headers = parseCSVLine(lines[0]);
+  flatRows = []; allRecords = [];
+  for (let i=1; i<lines.length; i++) {
+    const vals = parseCSVLine(lines[i]), row = {};
+    headers.forEach((h,j) => row[h] = vals[j]||"");
+    flatRows.push(row); allRecords.push(row);
   }
   initTable();
 }
-
 function parseJSON(text) {
   const data = JSON.parse(text);
-  if (Array.isArray(data)) {
-    allRecords = data;
-    flatRows = data.map(r => typeof r === "object" ? flattenRecord(r) : {value: r});
-  } else {
-    allRecords = [data];
-    flatRows = [flattenRecord(data)];
-  }
+  if (Array.isArray(data)) { allRecords = data; flatRows = data.map(r => typeof r==="object" ? flattenRecord(r) : {value:r}); }
+  else { allRecords = [data]; flatRows = [flattenRecord(data)]; }
   initTable();
 }
-
 function parseCSVLine(line) {
-  const result = []; let cur = "", inQuote = false;
-  for (let i = 0; i < line.length; i++) {
+  const result = []; let cur = "", inQ = false;
+  for (let i=0; i<line.length; i++) {
     const c = line[i];
-    if (inQuote) {
-      if (c === '"' && line[i+1] === '"') { cur += '"'; i++; }
-      else if (c === '"') inQuote = false;
-      else cur += c;
-    } else {
-      if (c === '"') inQuote = true;
-      else if (c === ',') { result.push(cur); cur = ""; }
-      else cur += c;
-    }
+    if (inQ) { if (c==='"'&&line[i+1]==='"'){cur+='"';i++} else if(c==='"')inQ=false; else cur+=c; }
+    else { if (c==='"')inQ=true; else if(c===','){result.push(cur);cur="";} else cur+=c; }
   }
-  result.push(cur);
-  return result;
+  result.push(cur); return result;
 }
 
 function flattenRecord(r) {
-  // If already flat (from CSV), return as-is
   if (!r.caps && !r.lim && !r.cost) {
-    const flat = {};
-    for (const [k, v] of Object.entries(r)) {
-      if (typeof v === "object" && v !== null) flat[k] = JSON.stringify(v);
-      else flat[k] = v;
-    }
+    const flat = {}; for (const [k,v] of Object.entries(r)) flat[k] = (typeof v==="object"&&v!==null) ? JSON.stringify(v) : v;
     return flat;
   }
-  // Flatten a full NormalizedRecord
-  const caps = r.caps || {}, lim = r.lim || {}, cost = r.cost || {}, meta = r.meta || {};
-  return {
-    key: r.key || "", model_key: r.model_key || "",
-    route: r.route || "", raw_id: r.raw_id || "", name: r.name || "",
-    family: r.family || "", context: lim.context ?? "",
-    input: lim.input ?? "", output: lim.output ?? "",
-    input_cost: cost.input ?? "", output_cost: cost.output ?? "",
-    cache_read: cost.cache_read ?? "", cache_write: cost.cache_write ?? "",
-    tools: caps.tools ?? "", structured_output: caps.structured_output ?? "",
-    reasoning: caps.reasoning ?? "", prompt_cache: caps.prompt_cache ?? "",
-    release_date: meta.release_date ?? "", updated_at: meta.updated_at ?? "",
-    modalities: (r.in_mod || []).join("/") + " → " + (r.out_mod || []).join("/"),
-    status: meta.status ?? "", api: meta.api ?? "",
-  };
+  const caps=r.caps||{}, lim=r.lim||{}, cost=r.cost||{}, meta=r.meta||{}, key=r.key||"";
+  return { key, model_key:r.model_key||"", route:r.route||"", raw_id:r.raw_id||"", name:r.name||"",
+    family:r.family||"", context:lim.context??"", input:lim.input??"", output:lim.output??"",
+    input_cost:cost.input??"", output_cost:cost.output??"", cache_read:cost.cache_read??"", cache_write:cost.cache_write??"",
+    vibes:"", tools:caps.tools??"", structured_output:caps.structured_output??"",
+    reasoning:caps.reasoning??"", prompt_cache:caps.prompt_cache??"",
+    release_date:meta.release_date??"", updated_at:meta.updated_at??"",
+    modalities:(r.in_mod||[]).join("/")+" → "+(r.out_mod||[]).join("/"), status:meta.status??"", api:meta.api??"" };
 }
 
-// -- Table init --
-function initTable() {
-  columns = Object.keys(flatRows[0] || {});
-  visibleCols = columns.filter(c => DEFAULT_COLS.includes(c));
-  if (!visibleCols.length) visibleCols = columns.slice(0, 12);
-  colFilters = {};
-  activeCaps.clear();
-  populateSidebar();
-  applyFilters();
-  renderMetrics();
-  showTable();
-}
+// -- Search & Filter --
+searchInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") { addFilterFromSearch(); e.target.blur(); }
+  if (e.key === "Escape") { searchInput.value = ""; activeFilters = []; applyFilters(); renderTable(); renderFiltersBar(); }
+});
 
-function populateSidebar() {
-  // Routes
-  const routes = [...new Set(flatRows.map(r => r.route).filter(Boolean))].sort();
-  routeFilter.innerHTML = routes.map(r => `<option value="${r}">${r}</option>`).join("");
-  // Caps chips
-  const capChips = $("#capChips");
-  capChips.innerHTML = CAP_FIELDS.map(c =>
-    `<span class="chip" data-cap="${c}">${c}</span>`
-  ).join("");
-  capChips.querySelectorAll(".chip").forEach(chip => {
-    chip.addEventListener("click", () => {
-      const cap = chip.dataset.cap;
-      if (activeCaps.has(cap)) { activeCaps.delete(cap); chip.classList.remove("active"); }
-      else { activeCaps.add(cap); chip.classList.add("active"); }
-      applyFilters(); renderTable();
-    });
-  });
-  // Column select
-  colSelect.innerHTML = columns.map(c =>
-    `<option value="${c}" ${visibleCols.includes(c) ? "selected" : ""}>${c}</option>`
-  ).join("");
-  colSelect.addEventListener("change", () => {
-    visibleCols = [...colSelect.selectedOptions].map(o => o.value);
-    renderTable();
-  });
-  // Event listeners
+function addFilterFromSearch() {
+  const raw = searchInput.value.trim();
+  if (!raw) return;
   searchInput.value = "";
-  minCtxInput.value = "";
-  searchInput.addEventListener("input", debounce(() => { applyFilters(); renderTable(); }, 150));
-  routeFilter.addEventListener("change", () => { applyFilters(); renderTable(); });
-  minCtxInput.addEventListener("input", debounce(() => { applyFilters(); renderTable(); }, 200));
+  // Parse col:value or col:>num or col:<num or plain text
+  const m = raw.match(/^(\w+):(>|<|>=|<=)?(.+)$/);
+  if (m && columns.includes(m[1])) {
+    const col = m[1], op = m[2] || "~", val = m[3];
+    if (op === "~") activeFilters.push({ type: "col", col, val });
+    else activeFilters.push({ type: "numeric", col, op, val: parseFloat(val) });
+  } else {
+    activeFilters.push({ type: "text", val: raw });
+  }
+  applyFilters(); renderTable(); renderFiltersBar();
 }
 
-function renderMetrics() {
-  const total = flatRows.length;
-  const routes = new Set(flatRows.map(r => r.route)).size;
-  const withCost = flatRows.filter(r => r.input_cost !== "" && r.input_cost !== undefined).length;
-  const withCtx = flatRows.filter(r => r.context !== "" && r.context !== undefined).length;
-  metricsDiv.innerHTML = [
-    ["records", total], ["routes", routes], ["with cost", withCost], ["with context", withCtx]
-  ].map(([l, v]) => `<div class="metric"><span class="metric-val">${v}</span><span class="metric-lbl">${l}</span></div>`).join("");
+function removeFilter(idx) {
+  activeFilters.splice(idx, 1);
+  applyFilters(); renderTable(); renderFiltersBar();
 }
 
-// -- Filtering --
+function renderFiltersBar() {
+  filtersBar.innerHTML = activeFilters.map((f, i) => {
+    let label;
+    if (f.type === "col") label = `${f.col}: ${f.val}`;
+    else if (f.type === "numeric") label = `${f.col} ${f.op} ${f.val}`;
+    else label = `"${f.val}"`;
+    return `<span class="filter-tag">${escHtml(label)}<span class="remove" data-idx="${i}">×</span></span>`;
+  }).join("");
+  filtersBar.querySelectorAll(".remove").forEach(el => {
+    el.addEventListener("click", () => removeFilter(parseInt(el.dataset.idx)));
+  });
+}
+
 function applyFilters() {
   let rows = flatRows;
-  const q = searchInput.value.trim().toLowerCase();
-  if (q) {
-    rows = rows.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q)));
-  }
-  const selectedRoutes = [...routeFilter.selectedOptions].map(o => o.value);
-  if (selectedRoutes.length) {
-    rows = rows.filter(r => selectedRoutes.includes(r.route));
-  }
-  for (const cap of activeCaps) {
-    rows = rows.filter(r => String(r[cap]).toLowerCase() === "true");
-  }
-  const minCtx = parseInt(minCtxInput.value);
-  if (minCtx > 0) {
-    rows = rows.filter(r => parseFloat(r.context) >= minCtx);
-  }
-  // Per-column filters
-  for (const [col, val] of Object.entries(colFilters)) {
-    if (!val) continue;
-    const v = val.toLowerCase();
-    rows = rows.filter(r => String(r[col] ?? "").toLowerCase().includes(v));
+  for (const f of activeFilters) {
+    if (f.type === "text") {
+      const v = f.val.toLowerCase();
+      rows = rows.filter(r => Object.values(r).some(x => String(x).toLowerCase().includes(v)));
+    } else if (f.type === "col") {
+      const v = f.val.toLowerCase();
+      rows = rows.filter(r => String(r[f.col]??"").toLowerCase().includes(v));
+    } else if (f.type === "numeric") {
+      rows = rows.filter(r => {
+        const n = parseFloat(r[f.col]);
+        if (isNaN(n)) return false;
+        if (f.op===">") return n > f.val;
+        if (f.op==="<") return n < f.val;
+        if (f.op===">=") return n >= f.val;
+        if (f.op==="<=") return n <= f.val;
+        return false;
+      });
+    }
   }
   filteredRows = rows;
   currentPage = 0;
 }
 
-// -- Sorting --
-function sortBy(col) {
-  if (sortCol === col) sortAsc = !sortAsc;
-  else { sortCol = col; sortAsc = true; }
-  const numCol = NUM_FIELDS.has(col);
-  filteredRows.sort((a, b) => {
-    let va = a[col] ?? "", vb = b[col] ?? "";
-    if (numCol) { va = parseFloat(va) || 0; vb = parseFloat(vb) || 0; }
+// -- Context Menu --
+let ctxCol = null;
+document.addEventListener("contextmenu", e => {
+  const th = e.target.closest("thead th");
+  if (!th) { hideCtx(); return; }
+  e.preventDefault();
+  ctxCol = th.dataset.col;
+  showCtxMenu(e.clientX, e.clientY, ctxCol);
+});
+document.addEventListener("click", hideCtx);
+
+function showCtxMenu(x, y, col) {
+  const isNum = NUM_FIELDS.has(col);
+  let items = [
+    { label: `Sort ↑ ${col}`, action: () => { sortCol=col; sortAsc=true; doSort(); } },
+    { label: `Sort ↓ ${col}`, action: () => { sortCol=col; sortAsc=false; doSort(); } },
+    { label: `Filter ${col}…`, action: () => { searchInput.value=col+":"; searchInput.focus(); }, sep: true },
+  ];
+  if (isNum) {
+    items.push({ label: `${col} > …`, action: () => { searchInput.value=col+":>"; searchInput.focus(); } });
+  }
+  items.push({ label: `Hide "${col}"`, action: () => { visibleCols = visibleCols.filter(c=>c!==col); savePrefs({visibleCols}); renderTable(); }, sep: true });
+  items.push({ label: "Show all columns", action: () => { visibleCols = [...columns]; savePrefs({visibleCols}); renderTable(); } });
+
+  ctxMenu.innerHTML = items.map((it,i) =>
+    `<div class="ctx-menu-item${it.sep?' sep':''}" data-idx="${i}">${it.label}</div>`
+  ).join("");
+  ctxMenu.style.display = "block";
+  ctxMenu.style.left = Math.min(x, window.innerWidth - 180) + "px";
+  ctxMenu.style.top = Math.min(y, window.innerHeight - items.length*28) + "px";
+  ctxMenu.querySelectorAll(".ctx-menu-item").forEach((el, i) => {
+    el.addEventListener("click", () => { items[i].action(); hideCtx(); });
+  });
+}
+function hideCtx() { ctxMenu.style.display = "none"; }
+
+function doSort() {
+  const numCol = NUM_FIELDS.has(sortCol);
+  filteredRows.sort((a,b) => {
+    let va = a[sortCol]??"", vb = b[sortCol]??"";
+    if (numCol) { va = parseFloat(va)||0; vb = parseFloat(vb)||0; }
     else { va = String(va).toLowerCase(); vb = String(vb).toLowerCase(); }
-    if (va < vb) return sortAsc ? -1 : 1;
-    if (va > vb) return sortAsc ? 1 : -1;
-    return 0;
+    if (va<vb) return sortAsc?-1:1; if (va>vb) return sortAsc?1:-1; return 0;
   });
   renderTable();
 }
 
-// -- Rendering --
+// -- Init --
+function initTable() {
+  columns = Object.keys(flatRows[0] || {});
+  visibleCols = prefs.visibleCols || columns.filter(c => DEFAULT_COLS.includes(c));
+  if (!visibleCols.length) visibleCols = columns.slice(0, 12);
+  recomputeVibesCounts();
+  applyFilters();
+  renderMetrics();
+  showTable();
+}
+
+function renderMetrics() {
+  const total = flatRows.length, routes = new Set(flatRows.map(r=>r.route)).size;
+  const withCost = flatRows.filter(r=>r.input_cost!==""&&r.input_cost!==undefined).length;
+  const withVibes = flatRows.filter(r=>r.vibes>0).length;
+  metricsDiv.innerHTML = [
+    ["records",total],["routes",routes],["w/ cost",withCost],["w/ vibes",withVibes]
+  ].map(([l,v])=>`<div class="metric"><span class="metric-val">${v}</span><span class="metric-lbl">${l}</span></div>`).join("");
+}
+
 function showTable() {
-  dropZone.style.display = "none";
+  const dz = $("#dropZone");
+  if (dz) dz.style.display = "none";
   if (!document.getElementById("tableWrap")) {
-    contentArea.innerHTML = `
-      <div class="table-wrap" id="tableWrap"><table><thead></thead><tbody></tbody></table></div>
-      <div class="pagination" id="pagination"></div>
-    `;
+    contentArea.innerHTML = `<div class="table-wrap" id="tableWrap"><table><thead></thead><tbody></tbody></table></div><div class="pagination" id="pagination"></div>`;
   }
   renderTable();
 }
 
 function renderTable() {
-  const thead = contentArea.querySelector("thead");
-  const tbody = contentArea.querySelector("tbody");
-
-  // Header row
+  const thead = contentArea.querySelector("thead"), tbody = contentArea.querySelector("tbody");
   let hdr = "<tr>" + visibleCols.map(c => {
-    const arrow = sortCol === c ? (sortAsc ? "▲" : "▼") : "⇅";
-    const cls = sortCol === c ? "active" : "";
+    const arrow = sortCol===c ? (sortAsc?"▲":"▼") : "⇅";
+    const cls = sortCol===c ? "active" : "";
     return `<th data-col="${c}">${c}<span class="sort-arrow ${cls}">${arrow}</span></th>`;
   }).join("") + "</tr>";
-  // Filter row
-  hdr += "<tr class=\"filter-row\">" + visibleCols.map(c =>
-    `<th><input type="text" data-col="${c}" placeholder="…" value="${colFilters[c] || ""}"></th>`
-  ).join("") + "</tr>";
   thead.innerHTML = hdr;
-
-  // Bind header clicks
-  thead.querySelectorAll("tr:first-child th").forEach(th => {
-    th.addEventListener("click", () => sortBy(th.dataset.col));
-  });
-  // Bind filter inputs
-  thead.querySelectorAll(".filter-row input").forEach(inp => {
-    inp.addEventListener("input", debounce(() => {
-      colFilters[inp.dataset.col] = inp.value;
-      applyFilters(); renderTable();
-    }, 150));
+  thead.querySelectorAll("th").forEach(th => {
+    th.addEventListener("click", e => { if (e.button===0) { sortCol=th.dataset.col; sortAsc = sortCol===th.dataset.col ? !sortAsc : true; doSort(); }});
   });
 
-  // Body rows (paginated)
   const start = currentPage * pageSize;
   const pageRows = filteredRows.slice(start, start + pageSize);
   tbody.innerHTML = pageRows.map((row, i) => {
-    const idx = start + i;
-    const cls = idx === selectedIdx ? "selected" : "";
-    return `<tr class="${cls}" data-idx="${idx}">` +
-      visibleCols.map(c => {
-        const v = row[c] ?? "";
-        const isNum = NUM_FIELDS.has(c) && v !== "";
-        return `<td class="${isNum ? "num" : ""}" title="${escHtml(String(v))}">${escHtml(String(v))}</td>`;
-      }).join("") + "</tr>";
+    const idx = start + i, cls = idx===selectedIdx ? "selected" : "";
+    return `<tr class="${cls}" data-idx="${idx}">` + visibleCols.map(c => {
+      const v = row[c]??"", isNum = NUM_FIELDS.has(c) && v!=="";
+      return `<td class="${isNum?"num":""}" title="${escHtml(String(v))}">${escHtml(String(v))}</td>`;
+    }).join("") + "</tr>";
   }).join("");
 
-  // Bind row clicks
   tbody.querySelectorAll("tr").forEach(tr => {
     tr.addEventListener("click", () => {
       selectedIdx = parseInt(tr.dataset.idx);
       showDetail(selectedIdx);
-      tbody.querySelectorAll("tr").forEach(t => t.classList.remove("selected"));
+      tbody.querySelectorAll("tr").forEach(t=>t.classList.remove("selected"));
       tr.classList.add("selected");
     });
   });
-
-  // Pagination
   renderPagination();
-  // Status
-  statusbar.innerHTML = `<span>Showing ${start+1}–${Math.min(start+pageSize, filteredRows.length)} of ${filteredRows.length} (${flatRows.length} total)</span>`;
+  statusbar.innerHTML = `<span>Showing ${start+1}–${Math.min(start+pageSize, filteredRows.length)} of ${filteredRows.length}</span>`;
 }
 
 function renderPagination() {
   const totalPages = Math.ceil(filteredRows.length / pageSize);
   const pag = document.getElementById("pagination");
   if (!pag) return;
-  pag.innerHTML = `
-    <button class="btn" ${currentPage === 0 ? "disabled" : ""} id="prevPage">← Prev</button>
-    <span>Page ${currentPage + 1} / ${totalPages || 1}</span>
-    <button class="btn" ${currentPage >= totalPages - 1 ? "disabled" : ""} id="nextPage">Next →</button>
-    <select id="pageSizeSelect">${PAGE_SIZE_OPTIONS.map(n => `<option value="${n}" ${n===pageSize?"selected":""}>${n} / page</option>`).join("")}</select>
-  `;
-  const prev = document.getElementById("prevPage");
-  const next = document.getElementById("nextPage");
-  const psel = document.getElementById("pageSizeSelect");
-  prev.addEventListener("click", () => { if (currentPage > 0) { currentPage--; renderTable(); }});
-  next.addEventListener("click", () => { if (currentPage < totalPages - 1) { currentPage++; renderTable(); }});
-  psel.addEventListener("change", () => { pageSize = parseInt(psel.value); currentPage = 0; renderTable(); });
+  pag.innerHTML = `<button class="btn" ${currentPage===0?"disabled":""} id="prevPage">← Prev</button>
+    <span>Page ${currentPage+1} / ${totalPages||1}</span>
+    <button class="btn" ${currentPage>=totalPages-1?"disabled":""} id="nextPage">Next →</button>
+    <select id="pageSizeSelect">${PAGE_SIZE_OPTIONS.map(n=>`<option value="${n}" ${n===pageSize?"selected":""}>${n}/pg</option>`).join("")}</select>`;
+  document.getElementById("prevPage").addEventListener("click", () => { if(currentPage>0){currentPage--;renderTable();}});
+  document.getElementById("nextPage").addEventListener("click", () => { if(currentPage<totalPages-1){currentPage++;renderTable();}});
+  document.getElementById("pageSizeSelect").addEventListener("change", e => { pageSize=parseInt(e.target.value); currentPage=0; renderTable(); });
 }
 
+// -- Detail panel --
 function showDetail(idx) {
   const rec = allRecords[idx];
   if (!rec) return;
   detailPanel.classList.add("open");
-  const title = rec.name || rec.raw_id || rec.key || `Record ${idx}`;
+  const flat = flatRows[idx] || {};
+  const title = rec.name || rec.raw_id || rec.key || flat.name || flat.raw_id || `Record ${idx}`;
   $("#detailTitle").textContent = title;
 
-  // Build collapsible panels
-  const flat = flatRows[idx] || {};
   const modelKey = rec.key || flat.key || "";
-  // Find vibes matching this model (prefix match for versioned keys)
-  const vibes = findVibesForModel(modelKey, rec.route);
-
+  const vibes = findVibesForModel(modelKey);
   let html = '';
-
-  // Vibes panel
-  html += collapsePanel("Vibes", vibes.length, vibes.length > 0, renderVibes(vibes));
-
-  // Record JSON panel
-  html += collapsePanel("Record JSON", null, vibes.length === 0,
-    `<pre style="font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px;white-space:pre-wrap;word-break:break-all;max-height:50vh;overflow-y:auto;margin:0">${escHtml(JSON.stringify(rec, null, 2))}</pre>`);
+  html += collapsePanel("Vibes", vibes.length, true, renderVibes(vibes), "vibes");
+  html += collapsePanel("Record JSON", null, false,
+    `<pre style="font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px;white-space:pre-wrap;word-break:break-all;max-height:60vh;overflow-y:auto;margin:0">${escHtml(JSON.stringify(rec, null, 2))}</pre>`, "json");
 
   $("#detailContent").innerHTML = html;
-
-  // Bind collapse toggles
   $("#detailContent").querySelectorAll(".collapse-header").forEach(h => {
     h.addEventListener("click", () => {
-      const body = h.nextElementSibling;
-      const arrow = h.querySelector(".arrow");
-      body.classList.toggle("open");
-      arrow.classList.toggle("open");
+      const body = h.nextElementSibling, arrow = h.querySelector(".arrow");
+      body.classList.toggle("open"); arrow.classList.toggle("open");
+      const pid = h.parentElement.dataset.panelId;
+      if (pid) savePrefs({ [pid]: body.classList.contains("open") });
     });
   });
 }
 
-function findVibesForModel(modelKey, route) {
-  if (!vibeSignals.length) return [];
-  // Exact match
+function findVibesForModel(modelKey) {
+  if (!vibeSignals.length || !modelKey) return [];
   if (vibesByModel[modelKey]) return vibesByModel[modelKey];
-  // Try prefix/substring matches
   const matches = [];
   for (const [k, sigs] of Object.entries(vibesByModel)) {
-    if (modelKey && (k.startsWith(modelKey) || modelKey.startsWith(k))) {
-      matches.push(...sigs);
-    } else if (route && k.startsWith(route + "/")) {
-      // same provider — check if raw_id overlaps
-      matches.push(...sigs);
-    }
+    if (modelKey.startsWith(k) && (modelKey.length===k.length || /[^a-z]/.test(modelKey[k.length]))) matches.push(...sigs);
+    else if (k.startsWith(modelKey) && (k.length===modelKey.length || /[^a-z]/.test(k[modelKey.length]))) matches.push(...sigs);
   }
   return matches;
 }
 
-function collapsePanel(title, badge, startOpen, body) {
-  const arrowCls = startOpen ? "arrow open" : "arrow";
-  const bodyCls = startOpen ? "collapse-body open" : "collapse-body";
+function collapsePanel(title, badge, startOpen, body, id) {
+  const prefKey = `panel_${id||title}`;
+  const isOpen = prefs[prefKey] !== undefined ? prefs[prefKey] : startOpen;
   const badgeHtml = badge !== null ? `<span class="badge">${badge}</span>` : '';
-  return `<div class="collapse-panel">
-    <div class="collapse-header"><span class="${arrowCls}">▶</span>${title}${badgeHtml}</div>
-    <div class="${bodyCls}">${body}</div>
-  </div>`;
+  return `<div class="collapse-panel" data-panel-id="${prefKey}">
+    <div class="collapse-header"><span class="arrow${isOpen?' open':''}">▶</span>${title}${badgeHtml}</div>
+    <div class="collapse-body${isOpen?' open':''}">${body}</div></div>`;
 }
 
 function renderVibes(vibes) {
-  if (!vibes.length) return '<div class="vibe-summary">No vibes loaded for this model.<br>Load a <code>vibes_signals.jsonl</code> file.</div>';
-  // Summary
+  if (!vibes.length) return '<div class="vibe-summary">No vibes for this model.</div>';
   const sentCounts = {};
-  for (const v of vibes) sentCounts[v.sentiment] = (sentCounts[v.sentiment]||0) + 1;
-  const avgIntensity = vibes.reduce((s,v) => s + (v.intensity||0), 0) / vibes.length;
-  let summary = `<div class="vibe-summary"><strong>${vibes.length}</strong> signals · avg intensity <strong>${avgIntensity >= 0 ? '+' : ''}${avgIntensity.toFixed(2)}</strong> · `;
-  summary += Object.entries(sentCounts).map(([k,v]) => `${k}: ${v}`).join(', ');
-  summary += '</div>';
-  // Cards
-  const cards = vibes.slice(0, 50).map(v => {
-    const cls = `vibe-card sent-${v.sentiment || 'neutral'}`;
-    const date = v.timestamp ? v.timestamp.slice(0, 10) : '';
-    const dims = (v.dimensions || []).map(d => `<span>${d}</span>`).join('');
+  for (const v of vibes) sentCounts[v.sentiment] = (sentCounts[v.sentiment]||0)+1;
+  const avg = vibes.reduce((s,v)=>s+(v.intensity||0),0)/vibes.length;
+  let out = `<div class="vibe-summary"><strong>${vibes.length}</strong> signals · intensity <strong>${avg>=0?'+':''}${avg.toFixed(2)}</strong> · ${Object.entries(sentCounts).map(([k,v])=>`${k}:${v}`).join(' ')}</div>`;
+  out += vibes.slice(0,50).map(v => {
+    const cls = `vibe-card sent-${v.sentiment||'neutral'}`;
+    const date = v.timestamp ? v.timestamp.slice(0,10) : '';
+    const dims = (v.dimensions||[]).map(d=>`<span>${d}</span>`).join('');
     const link = v.url ? `<a href="${escHtml(v.url)}" target="_blank" style="color:var(--accent)">↗</a>` : '';
-    return `<div class="${cls}">
-      <div class="vibe-meta"><span class="src">${v.source||''}</span><span>${date}</span><span>${v.author||''}</span>${link}</div>
-      <div class="vibe-text">${escHtml((v.text||'').slice(0, 300))}${(v.text||'').length > 300 ? '…' : ''}</div>
-      ${dims ? `<div class="vibe-dims">${dims}</div>` : ''}
-    </div>`;
+    return `<div class="${cls}"><div class="vibe-meta"><span class="src">${v.source||''}</span><span>${date}</span><span>${v.author||''}</span>${link}</div><div class="vibe-text">${escHtml((v.text||'').slice(0,300))}${(v.text||'').length>300?'…':''}</div>${dims?`<div class="vibe-dims">${dims}</div>`:''}</div>`;
   }).join('');
-  return summary + cards;
+  return out;
 }
+
+// -- Resize handle --
+(function() {
+  const handle = $("#resizeHandle");
+  let startX, startW;
+  handle.addEventListener("mousedown", e => {
+    e.preventDefault();
+    startX = e.clientX; startW = detailPanel.offsetWidth;
+    handle.classList.add("active");
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+  function onMove(e) {
+    const w = startW + (startX - e.clientX);
+    detailPanel.style.width = Math.max(200, Math.min(w, window.innerWidth*0.7)) + "px";
+  }
+  function onUp() {
+    handle.classList.remove("active");
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+    savePrefs({ detailWidth: detailPanel.style.width });
+  }
+})();
+if (prefs.detailWidth) detailPanel.style.width = prefs.detailWidth;
 
 // -- Utils --
-function escHtml(s) {
-  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-}
-function debounce(fn, ms) {
-  let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
-}
-function resetFilters() {
-  searchInput.value = ""; minCtxInput.value = "";
-  routeFilter.selectedIndex = -1;
-  activeCaps.clear();
-  $$(".chip").forEach(c => c.classList.remove("active"));
-  colFilters = {};
-  sortCol = null; sortAsc = true;
-  applyFilters(); renderTable();
-}
+function escHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(()=>fn(...a), ms); }; }
 
-// Keyboard shortcut: Escape closes detail
+// -- Keyboard --
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") detailPanel.classList.remove("open");
+  if (e.key === "Escape") { detailPanel.classList.remove("open"); hideCtx(); }
+  if (e.key === "/" && document.activeElement !== searchInput) { e.preventDefault(); searchInput.focus(); }
 });
+
+// Restore detail panel state
+if (prefs.detailOpen) detailPanel.classList.add("open");
 </script>
 </body>
 </html>
