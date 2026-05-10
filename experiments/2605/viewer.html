@@ -23,6 +23,14 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .search-wrap .icon { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--text2); pointer-events: none; }
 .search-help { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; font-size: 11px; color: var(--text2); z-index: 100; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.1); line-height: 1.6; }
 .search-wrap input:focus ~ .search-help { display: block; }
+.search-wrap .autocomplete.visible ~ .search-help { display: none; }
+.search-wrap .autocomplete { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; z-index: 200; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.15); max-height: 220px; overflow-y: auto; }
+.search-wrap .autocomplete.visible { display: block; }
+.search-wrap .autocomplete .ac-item { padding: 5px 10px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.search-wrap .autocomplete .ac-item:hover, .search-wrap .autocomplete .ac-item.active { background: var(--hover); }
+.search-wrap .autocomplete .ac-item .ac-hint { font-size: 10px; color: var(--text2); margin-left: 8px; }
+.search-wrap .autocomplete .ac-section { padding: 3px 10px; font-size: 10px; color: var(--text2); font-weight: 600; text-transform: uppercase; border-top: 1px solid var(--border); }
+.search-wrap .autocomplete .ac-section:first-child { border-top: none; }
 .search-help kbd { background: var(--badge); padding: 1px 4px; border-radius: 3px; font-family: var(--font); }
 .metrics { display: flex; gap: 14px; margin-left: 12px; }
 .metric { display: flex; align-items: baseline; gap: 4px; }
@@ -108,6 +116,22 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .filter-tag .remove:hover { color: #c62828; }
 
 input[type="file"] { display: none; }
+
+/* Settings modal */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 900; display: none; align-items: center; justify-content: center; }
+.modal-backdrop.open { display: flex; }
+.modal { background: var(--surface); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.18); width: 440px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.modal-header h2 { font-size: 14px; font-weight: 600; }
+.modal-close { background: none; border: none; font-size: 18px; cursor: pointer; color: var(--text2); padding: 2px 6px; border-radius: var(--radius); }
+.modal-close:hover { background: var(--hover); }
+.modal-body { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.file-slot { border: 1px dashed var(--border); border-radius: var(--radius); padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.file-slot.has-file { border-style: solid; border-color: var(--accent); background: var(--selected); }
+.file-slot label { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text2); }
+.file-slot .file-info { font-size: 12px; color: var(--text); }
+.file-slot .file-actions { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+.file-slot .file-hint { font-size: 11px; color: var(--text2); }
 </style>
 </head>
 <body>
@@ -116,7 +140,8 @@ input[type="file"] { display: none; }
   <h1>Models.dev</h1>
   <div class="search-wrap">
     <span class="icon">⌕</span>
-    <input type="text" id="searchInput" placeholder="Search… (col:value for column filter, e.g. route:openai)">
+    <input type="text" id="searchInput" autocomplete="off" placeholder="Search… (col:value for column filter, e.g. route:openai)">
+    <div class="autocomplete" id="acDropdown"></div>
     <div class="search-help">
       <kbd>text</kbd> search all columns &nbsp;
       <kbd>col:value</kbd> filter column &nbsp;
@@ -127,8 +152,7 @@ input[type="file"] { display: none; }
   </div>
   <div class="metrics" id="metrics"></div>
   <div class="topbar-right">
-    <label class="btn btn-accent" for="fileInput">Open</label>
-    <input type="file" id="fileInput" accept=".json,.jsonl,.csv" multiple>
+    <button class="btn" id="settingsBtn" title="Settings">⚙</button>
   </div>
 </div>
 
@@ -138,7 +162,7 @@ input[type="file"] { display: none; }
   <div class="content" id="contentArea">
     <div class="drop-zone" id="dropZone">
       <p>Drop <strong>.jsonl</strong> / <strong>.csv</strong> / <strong>.json</strong> files here</p>
-      <p style="font-size:12px;color:var(--text2)">Or use <code>python 1003_serve_viewer.py</code> to auto-load</p>
+      <p style="font-size:12px;color:var(--text2)">Or click <strong>⚙</strong> to open settings, or run <code>python 1003_serve_viewer.py</code></p>
     </div>
   </div>
 
@@ -154,6 +178,32 @@ input[type="file"] { display: none; }
 </div>
 
 <div class="ctx-menu" id="ctxMenu" style="display:none"></div>
+
+<div class="modal-backdrop" id="settingsModal">
+  <div class="modal">
+    <div class="modal-header"><h2>Settings</h2><button class="modal-close" id="modalClose">×</button></div>
+    <div class="modal-body">
+      <div class="file-slot" id="slotRecords">
+        <label>Records (models data)</label>
+        <div class="file-info" id="recordsInfo">No file loaded</div>
+        <div class="file-hint">.jsonl / .csv / .json</div>
+        <div class="file-actions">
+          <button class="btn btn-accent" id="pickRecords">Choose file</button>
+          <input type="file" id="inputRecords" accept=".json,.jsonl,.csv" style="display:none">
+        </div>
+      </div>
+      <div class="file-slot" id="slotVibes">
+        <label>Vibes (signals)</label>
+        <div class="file-info" id="vibesInfo">No file loaded</div>
+        <div class="file-hint">.jsonl / .csv / .json</div>
+        <div class="file-actions">
+          <button class="btn btn-accent" id="pickVibes">Choose file</button>
+          <input type="file" id="inputVibes" accept=".json,.jsonl,.csv" style="display:none">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -186,31 +236,106 @@ const searchInput = $("#searchInput"), metricsDiv = $("#metrics");
 const statusbar = $("#statusbar"), filtersBar = $("#filtersBar");
 const ctxMenu = $("#ctxMenu");
 
-// -- File loading --
-$("#fileInput").addEventListener("change", e => { for (const f of e.target.files) loadFile(f); });
-document.addEventListener("dragover", e => e.preventDefault());
-document.addEventListener("drop", e => { e.preventDefault(); for (const f of e.dataTransfer.files) loadFile(f); });
+// -- Settings modal --
+const settingsModal = $("#settingsModal");
+$("#settingsBtn").addEventListener("click", () => settingsModal.classList.add("open"));
+$("#modalClose").addEventListener("click", () => settingsModal.classList.remove("open"));
+settingsModal.addEventListener("click", e => { if (e.target === settingsModal) settingsModal.classList.remove("open"); });
 
-function loadFile(file) {
+$("#pickRecords").addEventListener("click", () => $("#inputRecords").click());
+$("#pickVibes").addEventListener("click", () => $("#inputVibes").click());
+$("#inputRecords").addEventListener("change", e => { if (e.target.files[0]) readFileAs(e.target.files[0], "records"); });
+$("#inputVibes").addEventListener("change", e => { if (e.target.files[0]) readFileAs(e.target.files[0], "vibes"); });
+
+// Drag & drop on modal slots
+["slotRecords", "slotVibes"].forEach(id => {
+  const el = $("#" + id), kind = id === "slotRecords" ? "records" : "vibes";
+  el.addEventListener("dragover", e => { e.preventDefault(); el.classList.add("has-file"); });
+  el.addEventListener("dragleave", () => el.classList.remove("has-file"));
+  el.addEventListener("drop", e => { e.preventDefault(); el.classList.remove("has-file"); if (e.dataTransfer.files[0]) readFileAs(e.dataTransfer.files[0], kind); });
+});
+
+// Global drag-drop: guess by filename
+document.addEventListener("dragover", e => e.preventDefault());
+document.addEventListener("drop", e => {
+  e.preventDefault();
+  for (const f of e.dataTransfer.files) {
+    const name = f.name.toLowerCase();
+    const kind = (name.includes("vibes") || name.includes("signal")) ? "vibes" : "records";
+    readFileAs(f, kind);
+  }
+});
+
+// -- File loading --
+function readFileAs(file, kind) {
   const reader = new FileReader();
   reader.onload = () => {
-    const text = reader.result, name = file.name.toLowerCase();
-    if (name.includes("vibes") || name.includes("signal")) { loadVibes(text); return; }
-    if (name.endsWith(".jsonl")) parseJSONL(text);
-    else if (name.endsWith(".csv")) parseCSV(text);
-    else if (name.endsWith(".json")) parseJSON(text);
-    updateStatus();
+    const text = reader.result;
+    if (kind === "vibes") loadVibes(text, file.name);
+    else loadRecords(text, file.name);
   };
   reader.readAsText(file);
 }
 
-function loadVibes(text) {
-  vibeSignals = text.trim().split("\n").filter(l => l.trim()).map(l => JSON.parse(l));
-  vibesByModel = {};
-  for (const s of vibeSignals) { const k = s.model_key||""; (vibesByModel[k] ??= []).push(s); }
-  recomputeVibesCounts();
-  updateStatus();
-  if (flatRows.length) { applyFilters(); renderTable(); }
+function detectFormat(text) {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+    // Could be JSON array/object or JSONL
+    if (trimmed.startsWith("[")) return "json";
+    // Multiple lines starting with { → JSONL
+    const lines = trimmed.split("\n");
+    if (lines.length > 1 && lines[1].trim().startsWith("{")) return "jsonl";
+    return "json";
+  }
+  // Check if first line looks like CSV headers
+  const firstLine = trimmed.split("\n")[0];
+  if (firstLine.includes(",") && !firstLine.startsWith("{")) return "csv";
+  return "jsonl"; // fallback
+}
+
+function parseAny(text) {
+  const fmt = detectFormat(text);
+  if (fmt === "json") {
+    const data = JSON.parse(text);
+    return Array.isArray(data) ? data : [data];
+  }
+  if (fmt === "jsonl") {
+    return text.trim().split("\n").filter(l => l.trim()).map(l => JSON.parse(l));
+  }
+  // csv
+  const lines = text.trim().split("\n"), headers = parseCSVLine(lines[0]);
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const vals = parseCSVLine(lines[i]), row = {};
+    headers.forEach((h, j) => row[h] = vals[j] || "");
+    rows.push(row);
+  }
+  return rows;
+}
+
+function loadRecords(text, filename) {
+  try {
+    const data = parseAny(text);
+    allRecords = data;
+    flatRows = data.map((r, i) => { const f = (typeof r === "object") ? flattenRecord(r) : { value: r }; f._oidx = i; return f; });
+    initTable();
+    $("#recordsInfo").textContent = `${filename} (${allRecords.length} records)`;
+    $("#slotRecords").classList.add("has-file");
+    updateStatus();
+  } catch (e) { alert("Failed to parse records: " + e.message); }
+}
+
+function loadVibes(text, filename) {
+  try {
+    vibeSignals = parseAny(text);
+    vibesByModel = {};
+    for (const s of vibeSignals) { const k = s.model_key || ""; (vibesByModel[k] ??= []).push(s); }
+    recomputeVibesCounts();
+    $("#vibesInfo").textContent = `${filename || "server"} (${vibeSignals.length} signals)`;
+    $("#slotVibes").classList.add("has-file");
+    updateStatus();
+    if (flatRows.length) { renderMetrics(); applyFilters(); renderTable(); }
+  } catch (e) { alert("Failed to parse vibes: " + e.message); }
 }
 
 function recomputeVibesCounts() {
@@ -224,27 +349,6 @@ function updateStatus() {
   statusbar.innerHTML = `<span>${parts.join(" · ") || "No file loaded"}</span>`;
 }
 
-function parseJSONL(text) {
-  allRecords = text.trim().split("\n").filter(l=>l.trim()).map(l=>JSON.parse(l));
-  flatRows = allRecords.map(flattenRecord);
-  initTable();
-}
-function parseCSV(text) {
-  const lines = text.trim().split("\n"), headers = parseCSVLine(lines[0]);
-  flatRows = []; allRecords = [];
-  for (let i=1; i<lines.length; i++) {
-    const vals = parseCSVLine(lines[i]), row = {};
-    headers.forEach((h,j) => row[h] = vals[j]||"");
-    flatRows.push(row); allRecords.push(row);
-  }
-  initTable();
-}
-function parseJSON(text) {
-  const data = JSON.parse(text);
-  if (Array.isArray(data)) { allRecords = data; flatRows = data.map(r => typeof r==="object" ? flattenRecord(r) : {value:r}); }
-  else { allRecords = [data]; flatRows = [flattenRecord(data)]; }
-  initTable();
-}
 function parseCSVLine(line) {
   const result = []; let cur = "", inQ = false;
   for (let i=0; i<line.length; i++) {
@@ -271,9 +375,159 @@ function flattenRecord(r) {
 }
 
 // -- Search & Filter --
+// -- Autocomplete --
+const acDropdown = $("#acDropdown");
+let acItems = [], acIdx = -1;
+const HISTORY_KEY = "viewer_search_history";
+function getSearchHistory() { try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; } catch { return []; } }
+function addSearchHistory(q) {
+  if (!q) return;
+  let h = getSearchHistory().filter(x => x !== q);
+  h.unshift(q);
+  if (h.length > 20) h = h.slice(0, 20);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(h));
+}
+
+function getAcSuggestions(input) {
+  const suggestions = [];
+  if (!input) {
+    // Show recent searches when empty
+    const history = getSearchHistory();
+    if (history.length) {
+      suggestions.push({ section: "Recent" });
+      history.slice(0, 6).forEach(h => suggestions.push({ text: h, hint: "history" }));
+    }
+    // Show column hints
+    if (columns.length) {
+      suggestions.push({ section: "Columns" });
+      columns.slice(0, 8).forEach(c => suggestions.push({ text: c + ":", hint: "column filter" }));
+    }
+    return suggestions;
+  }
+
+  // Check if input matches "col:" pattern
+  const colonMatch = input.match(/^(\w+):(.*)$/);
+  if (colonMatch) {
+    const col = colonMatch[1], partial = colonMatch[2].toLowerCase();
+    if (columns.includes(col)) {
+      // Suggest operators for numeric columns
+      if (NUM_FIELDS.has(col) && !partial) {
+        suggestions.push({ section: `${col} (numeric)` });
+        [">0", ">100", ">1000", ">100000", "<1"].forEach(op =>
+          suggestions.push({ text: `${col}:${op}`, hint: "numeric filter" })
+        );
+      }
+      // Suggest unique values for the column
+      const uniq = new Set();
+      for (const row of flatRows) {
+        const v = String(row[col] ?? "").trim();
+        if (v && v !== "undefined" && v !== "null") uniq.add(v);
+        if (uniq.size > 200) break;
+      }
+      const vals = [...uniq].sort();
+      const matched = partial ? vals.filter(v => v.toLowerCase().includes(partial)) : vals;
+      if (matched.length) {
+        suggestions.push({ section: `${col} values` });
+        matched.slice(0, 10).forEach(v => suggestions.push({ text: `${col}:${v}`, hint: "" }));
+      }
+      return suggestions;
+    }
+  }
+
+  // Suggest matching column names
+  const lower = input.toLowerCase();
+  const matchingCols = columns.filter(c => c.toLowerCase().startsWith(lower));
+  if (matchingCols.length) {
+    suggestions.push({ section: "Columns" });
+    matchingCols.slice(0, 8).forEach(c => suggestions.push({ text: c + ":", hint: "column filter" }));
+  }
+
+  // Suggest matching history
+  const matchingHistory = getSearchHistory().filter(h => h.toLowerCase().includes(lower) && h !== input);
+  if (matchingHistory.length) {
+    suggestions.push({ section: "Recent" });
+    matchingHistory.slice(0, 4).forEach(h => suggestions.push({ text: h, hint: "history" }));
+  }
+
+  return suggestions;
+}
+
+function renderAc() {
+  const input = searchInput.value;
+  const suggestions = getAcSuggestions(input);
+  acItems = suggestions.filter(s => !s.section);
+  acIdx = -1;
+  if (!suggestions.length) { acDropdown.classList.remove("visible"); return; }
+  acDropdown.innerHTML = suggestions.map((s, i) => {
+    if (s.section) return `<div class="ac-section">${escHtml(s.section)}</div>`;
+    const dataIdx = acItems.indexOf(s);
+    return `<div class="ac-item" data-idx="${dataIdx}"><span>${escHtml(s.text)}</span><span class="ac-hint">${escHtml(s.hint)}</span></div>`;
+  }).join("");
+  acDropdown.classList.add("visible");
+  acDropdown.querySelectorAll(".ac-item").forEach(el => {
+    el.addEventListener("mousedown", e => {
+      e.preventDefault();
+      applyAcItem(parseInt(el.dataset.idx));
+    });
+  });
+}
+
+function applyAcItem(idx) {
+  if (idx < 0 || idx >= acItems.length) return;
+  const item = acItems[idx];
+  searchInput.value = item.text;
+  acDropdown.classList.remove("visible");
+  // If it ends with ":", keep focus for further typing
+  if (item.text.endsWith(":")) {
+    searchInput.focus();
+    renderAc();
+  } else {
+    addFilterFromSearch();
+    searchInput.blur();
+  }
+}
+
+function highlightAcItem(newIdx) {
+  const items = acDropdown.querySelectorAll(".ac-item");
+  items.forEach(el => el.classList.remove("active"));
+  acIdx = newIdx;
+  if (acIdx >= 0 && acIdx < items.length) {
+    const el = [...items].find(el => parseInt(el.dataset.idx) === acIdx);
+    if (el) { el.classList.add("active"); el.scrollIntoView({ block: "nearest" }); }
+  }
+}
+
+searchInput.addEventListener("input", debounce(renderAc, 80));
+searchInput.addEventListener("focus", () => { setTimeout(renderAc, 50); });
+searchInput.addEventListener("blur", () => { setTimeout(() => acDropdown.classList.remove("visible"), 150); });
+
 searchInput.addEventListener("keydown", e => {
-  if (e.key === "Enter") { addFilterFromSearch(); e.target.blur(); }
-  if (e.key === "Escape") { searchInput.value = ""; activeFilters = []; applyFilters(); renderTable(); renderFiltersBar(); }
+  const acVisible = acDropdown.classList.contains("visible");
+  if (e.key === "ArrowDown" && acVisible) {
+    e.preventDefault();
+    highlightAcItem(Math.min(acIdx + 1, acItems.length - 1));
+    return;
+  }
+  if (e.key === "ArrowUp" && acVisible) {
+    e.preventDefault();
+    highlightAcItem(Math.max(acIdx - 1, 0));
+    return;
+  }
+  if (e.key === "Tab" && acVisible && acIdx >= 0) {
+    e.preventDefault();
+    applyAcItem(acIdx);
+    return;
+  }
+  if (e.key === "Enter") {
+    if (acVisible && acIdx >= 0) { applyAcItem(acIdx); }
+    else { addSearchHistory(searchInput.value.trim()); addFilterFromSearch(); e.target.blur(); }
+    acDropdown.classList.remove("visible");
+    return;
+  }
+  if (e.key === "Escape") {
+    if (acVisible) { acDropdown.classList.remove("visible"); return; }
+    searchInput.value = ""; activeFilters = []; applyFilters(); renderTable(); renderFiltersBar();
+  }
 });
 
 function addFilterFromSearch() {
@@ -460,14 +714,15 @@ function renderPagination() {
 
 // -- Detail panel --
 function showDetail(idx) {
-  const rec = allRecords[idx];
-  if (!rec) return;
+  const flat = filteredRows[idx] || {};
+  const oidx = flat._oidx != null ? flat._oidx : idx;
+  const rec = allRecords[oidx] || flat;
+  if (!rec && !flat) return;
   detailPanel.classList.add("open");
-  const flat = flatRows[idx] || {};
-  const title = rec.name || rec.raw_id || rec.key || flat.name || flat.raw_id || `Record ${idx}`;
+  const title = flat.name || flat.raw_id || flat.key || rec.name || rec.raw_id || rec.key || `Record ${idx}`;
   $("#detailTitle").textContent = title;
 
-  const modelKey = rec.key || flat.key || "";
+  const modelKey = flat.key || rec.key || "";
   const vibes = findVibesForModel(modelKey);
   let html = '';
   html += collapsePanel("Vibes", vibes.length, true, renderVibes(vibes), "vibes");
@@ -551,7 +806,7 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 
 // -- Keyboard --
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") { detailPanel.classList.remove("open"); hideCtx(); }
+  if (e.key === "Escape") { settingsModal.classList.remove("open"); detailPanel.classList.remove("open"); hideCtx(); }
   if (e.key === "/" && document.activeElement !== searchInput) { e.preventDefault(); searchInput.focus(); }
 });
 

@@ -46,8 +46,10 @@ def build_handler(cfg: Cfg, records_path: Path | None,
   const _vibes = {vibes_json};
   if (_records) {{
     allRecords = _records;
-    flatRows = allRecords.map(flattenRecord);
+    flatRows = allRecords.map((r, i) => {{ const f = flattenRecord(r); f._oidx = i; return f; }});
     initTable();
+    document.querySelector("#recordsInfo").textContent = "server (" + allRecords.length + " records)";
+    document.querySelector("#slotRecords").classList.add("has-file");
   }}
   if (_vibes) {{
     vibeSignals = _vibes;
@@ -57,6 +59,10 @@ def build_handler(cfg: Cfg, records_path: Path | None,
       if (!vibesByModel[k]) vibesByModel[k] = [];
       vibesByModel[k].push(s);
     }}
+    recomputeVibesCounts();
+    document.querySelector("#vibesInfo").textContent = "server (" + vibeSignals.length + " signals)";
+    document.querySelector("#slotVibes").classList.add("has-file");
+    if (flatRows.length) {{ renderMetrics(); applyFilters(); renderTable(); }}
   }}
   updateStatus();
 }})();
