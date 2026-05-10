@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Models.dev Viewer</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #fafafa; --surface: #fff; --border: #e0e0e0;
+  --text: #1a1a1a; --text2: #666; --accent: #0067c0;
+  --hover: #f5f5f5; --selected: #e8f0fe; --badge: #e8e8e8;
+  --radius: 4px; --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+html, body { height: 100%; font-family: var(--font); font-size: 13px; color: var(--text); background: var(--bg); }
+body { display: flex; flex-direction: column; overflow: hidden; }
+
+/* Top bar */
+.topbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.topbar h1 { font-size: 15px; font-weight: 600; white-space: nowrap; }
+.metrics { display: flex; gap: 16px; margin-left: 24px; }
+.metric { display: flex; flex-direction: column; align-items: center; }
+.metric-val { font-size: 16px; font-weight: 600; color: var(--accent); }
+.metric-lbl { font-size: 11px; color: var(--text2); }
+.topbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.btn { padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); cursor: pointer; font-size: 12px; color: var(--text); }
+.btn:hover { background: var(--hover); }
+.btn-accent { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-accent:hover { opacity: 0.9; }
+
+/* Layout */
+.main { display: flex; flex: 1; overflow: hidden; }
+.sidebar { width: 240px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.sidebar.hidden { display: none; }
+.content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+/* Sidebar controls */
+.filter-group label { display: block; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.filter-group input, .filter-group select { width: 100%; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; background: var(--bg); }
+.filter-group select[multiple] { height: 90px; }
+.chip-container { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chip { padding: 2px 8px; border-radius: 12px; background: var(--badge); font-size: 11px; cursor: pointer; user-select: none; }
+.chip.active { background: var(--accent); color: #fff; }
+
+/* Table */
+.table-wrap { flex: 1; overflow: auto; position: relative; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: auto; }
+thead { position: sticky; top: 0; z-index: 2; }
+thead th { background: var(--surface); padding: 7px 10px; text-align: left; font-weight: 600; border-bottom: 2px solid var(--border); white-space: nowrap; cursor: pointer; user-select: none; }
+thead th:hover { background: var(--hover); }
+thead th .sort-arrow { margin-left: 4px; font-size: 10px; color: var(--text2); }
+thead th .sort-arrow.active { color: var(--accent); }
+tbody tr { border-bottom: 1px solid var(--border); }
+tbody tr:hover { background: var(--hover); }
+tbody tr.selected { background: var(--selected); }
+tbody td { padding: 5px 10px; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Detail panel */
+.detail-panel { width: 380px; flex-shrink: 0; background: var(--surface); border-left: 1px solid var(--border); overflow-y: auto; padding: 12px; display: none; }
+.detail-panel.open { display: block; }
+.detail-panel h3 { font-size: 13px; margin-bottom: 8px; }
+.detail-panel pre { font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: calc(100vh - 120px); overflow-y: auto; }
+
+/* Status bar */
+.statusbar { padding: 4px 16px; background: var(--surface); border-top: 1px solid var(--border); font-size: 11px; color: var(--text2); flex-shrink: 0; display: flex; gap: 16px; }
+
+/* Drop zone */
+.drop-zone { flex: 1; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; color: var(--text2); }
+.drop-zone.active { background: var(--selected); }
+.drop-zone p { font-size: 14px; }
+.drop-zone .hint { font-size: 12px; }
+input[type="file"] { display: none; }
+
+/* Filter row */
+.filter-row th { padding: 3px 4px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.filter-row input { width: 100%; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 11px; }
+
+/* Pagination */
+.pagination { display: flex; align-items: center; gap: 8px; padding: 6px 16px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
+.pagination select { padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Models.dev Viewer</h1>
+  <div class="metrics" id="metrics"></div>
+  <div class="topbar-right">
+    <button class="btn" id="toggleSidebar">☰ Filters</button>
+    <button class="btn" id="toggleDetail">Detail ▸</button>
+    <label class="btn btn-accent" for="fileInput">Open File</label>
+    <input type="file" id="fileInput" accept=".json,.jsonl,.csv">
+  </div>
+</div>
+
+<div class="main">
+  <div class="sidebar" id="sidebar">
+    <div class="filter-group">
+      <label>Search (all columns)</label>
+      <input type="text" id="searchInput" placeholder="type to filter…">
+    </div>
+    <div class="filter-group">
+      <label>Route</label>
+      <select id="routeFilter" multiple></select>
+    </div>
+    <div class="filter-group">
+      <label>Capabilities</label>
+      <div class="chip-container" id="capChips"></div>
+    </div>
+    <div class="filter-group">
+      <label>Min Context</label>
+      <input type="number" id="minContext" placeholder="0" min="0" step="1000">
+    </div>
+    <div class="filter-group">
+      <label>Columns</label>
+      <select id="colSelect" multiple></select>
+    </div>
+    <button class="btn" id="resetBtn" style="margin-top:auto;">Reset Filters</button>
+  </div>
+
+  <div class="content" id="contentArea">
+    <div class="drop-zone" id="dropZone">
+      <p>Drop a <strong>.jsonl</strong>, <strong>.csv</strong>, or <strong>.json</strong> file here</p>
+      <p class="hint">Or click "Open File" above</p>
+      <p class="hint">Expects output from <code>1001_collect_model_meta.py</code></p>
+    </div>
+  </div>
+
+  <div class="detail-panel" id="detailPanel">
+    <h3 id="detailTitle">Record</h3>
+    <pre id="detailJson"></pre>
+  </div>
+</div>
+
+<div class="statusbar" id="statusbar">
+  <span>No file loaded</span>
+</div>
+
+<script>
+"use strict";
+
+const PAGE_SIZE_OPTIONS = [50, 100, 200, 500, 1000];
+const DEFAULT_COLS = [
+  "route","raw_id","name","family","context","output",
+  "input_cost","output_cost","tools","structured_output","reasoning","modalities"
+];
+const CAP_FIELDS = ["tools","structured_output","reasoning","prompt_cache"];
+const NUM_FIELDS = new Set(["context","input","output","input_cost","output_cost","cache_read","cache_write"]);
+
+let allRecords = [];   // full JSONL records (with nested data)
+let flatRows = [];     // flattened rows for the table
+let filteredRows = []; // after filters
+let columns = [];      // all available columns
+let visibleCols = [];  // currently shown
+let sortCol = null, sortAsc = true;
+let currentPage = 0, pageSize = 100;
+let selectedIdx = -1;
+let colFilters = {};   // per-column inline filters
+let activeCaps = new Set();
+
+// DOM refs
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const dropZone = $("#dropZone"), contentArea = $("#contentArea");
+const sidebar = $("#sidebar"), detailPanel = $("#detailPanel");
+const searchInput = $("#searchInput"), routeFilter = $("#routeFilter");
+const minCtxInput = $("#minContext"), colSelect = $("#colSelect");
+const metricsDiv = $("#metrics"), statusbar = $("#statusbar");
+
+// -- File loading --
+$("#fileInput").addEventListener("change", e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("active"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("active"));
+dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("active"); if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
+$("#toggleSidebar").addEventListener("click", () => sidebar.classList.toggle("hidden"));
+$("#toggleDetail").addEventListener("click", () => detailPanel.classList.toggle("open"));
+$("#resetBtn").addEventListener("click", resetFilters);
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = reader.result;
+    const name = file.name.toLowerCase();
+    if (name.endsWith(".jsonl")) parseJSONL(text);
+    else if (name.endsWith(".csv")) parseCSV(text);
+    else if (name.endsWith(".json")) parseJSON(text);
+    else { alert("Unsupported file type. Use .jsonl, .csv, or .json"); return; }
+    statusbar.innerHTML = `<span>${file.name}</span><span>${allRecords.length} records loaded</span>`;
+  };
+  reader.readAsText(file);
+}
+
+function parseJSONL(text) {
+  const lines = text.trim().split("\n").filter(l => l.trim());
+  allRecords = lines.map(l => JSON.parse(l));
+  flatRows = allRecords.map(flattenRecord);
+  initTable();
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split("\n");
+  const headers = parseCSVLine(lines[0]);
+  flatRows = [];
+  allRecords = [];
+  for (let i = 1; i < lines.length; i++) {
+    const vals = parseCSVLine(lines[i]);
+    const row = {};
+    headers.forEach((h, j) => row[h] = vals[j] || "");
+    flatRows.push(row);
+    allRecords.push(row);
+  }
+  initTable();
+}
+
+function parseJSON(text) {
+  const data = JSON.parse(text);
+  if (Array.isArray(data)) {
+    allRecords = data;
+    flatRows = data.map(r => typeof r === "object" ? flattenRecord(r) : {value: r});
+  } else {
+    allRecords = [data];
+    flatRows = [flattenRecord(data)];
+  }
+  initTable();
+}
+
+function parseCSVLine(line) {
+  const result = []; let cur = "", inQuote = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQuote) {
+      if (c === '"' && line[i+1] === '"') { cur += '"'; i++; }
+      else if (c === '"') inQuote = false;
+      else cur += c;
+    } else {
+      if (c === '"') inQuote = true;
+      else if (c === ',') { result.push(cur); cur = ""; }
+      else cur += c;
+    }
+  }
+  result.push(cur);
+  return result;
+}
+
+function flattenRecord(r) {
+  // If already flat (from CSV), return as-is
+  if (!r.caps && !r.lim && !r.cost) {
+    const flat = {};
+    for (const [k, v] of Object.entries(r)) {
+      if (typeof v === "object" && v !== null) flat[k] = JSON.stringify(v);
+      else flat[k] = v;
+    }
+    return flat;
+  }
+  // Flatten a full NormalizedRecord
+  const caps = r.caps || {}, lim = r.lim || {}, cost = r.cost || {}, meta = r.meta || {};
+  return {
+    key: r.key || "", model_key: r.model_key || "",
+    route: r.route || "", raw_id: r.raw_id || "", name: r.name || "",
+    family: r.family || "", context: lim.context ?? "",
+    input: lim.input ?? "", output: lim.output ?? "",
+    input_cost: cost.input ?? "", output_cost: cost.output ?? "",
+    cache_read: cost.cache_read ?? "", cache_write: cost.cache_write ?? "",
+    tools: caps.tools ?? "", structured_output: caps.structured_output ?? "",
+    reasoning: caps.reasoning ?? "", prompt_cache: caps.prompt_cache ?? "",
+    release_date: meta.release_date ?? "", updated_at: meta.updated_at ?? "",
+    modalities: (r.in_mod || []).join("/") + " → " + (r.out_mod || []).join("/"),
+    status: meta.status ?? "", api: meta.api ?? "",
+  };
+}
+
+// -- Table init --
+function initTable() {
+  columns = Object.keys(flatRows[0] || {});
+  visibleCols = columns.filter(c => DEFAULT_COLS.includes(c));
+  if (!visibleCols.length) visibleCols = columns.slice(0, 12);
+  colFilters = {};
+  activeCaps.clear();
+  populateSidebar();
+  applyFilters();
+  renderMetrics();
+  showTable();
+}
+
+function populateSidebar() {
+  // Routes
+  const routes = [...new Set(flatRows.map(r => r.route).filter(Boolean))].sort();
+  routeFilter.innerHTML = routes.map(r => `<option value="${r}">${r}</option>`).join("");
+  // Caps chips
+  const capChips = $("#capChips");
+  capChips.innerHTML = CAP_FIELDS.map(c =>
+    `<span class="chip" data-cap="${c}">${c}</span>`
+  ).join("");
+  capChips.querySelectorAll(".chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const cap = chip.dataset.cap;
+      if (activeCaps.has(cap)) { activeCaps.delete(cap); chip.classList.remove("active"); }
+      else { activeCaps.add(cap); chip.classList.add("active"); }
+      applyFilters(); renderTable();
+    });
+  });
+  // Column select
+  colSelect.innerHTML = columns.map(c =>
+    `<option value="${c}" ${visibleCols.includes(c) ? "selected" : ""}>${c}</option>`
+  ).join("");
+  colSelect.addEventListener("change", () => {
+    visibleCols = [...colSelect.selectedOptions].map(o => o.value);
+    renderTable();
+  });
+  // Event listeners
+  searchInput.value = "";
+  minCtxInput.value = "";
+  searchInput.addEventListener("input", debounce(() => { applyFilters(); renderTable(); }, 150));
+  routeFilter.addEventListener("change", () => { applyFilters(); renderTable(); });
+  minCtxInput.addEventListener("input", debounce(() => { applyFilters(); renderTable(); }, 200));
+}
+
+function renderMetrics() {
+  const total = flatRows.length;
+  const routes = new Set(flatRows.map(r => r.route)).size;
+  const withCost = flatRows.filter(r => r.input_cost !== "" && r.input_cost !== undefined).length;
+  const withCtx = flatRows.filter(r => r.context !== "" && r.context !== undefined).length;
+  metricsDiv.innerHTML = [
+    ["records", total], ["routes", routes], ["with cost", withCost], ["with context", withCtx]
+  ].map(([l, v]) => `<div class="metric"><span class="metric-val">${v}</span><span class="metric-lbl">${l}</span></div>`).join("");
+}
+
+// -- Filtering --
+function applyFilters() {
+  let rows = flatRows;
+  const q = searchInput.value.trim().toLowerCase();
+  if (q) {
+    rows = rows.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q)));
+  }
+  const selectedRoutes = [...routeFilter.selectedOptions].map(o => o.value);
+  if (selectedRoutes.length) {
+    rows = rows.filter(r => selectedRoutes.includes(r.route));
+  }
+  for (const cap of activeCaps) {
+    rows = rows.filter(r => String(r[cap]).toLowerCase() === "true");
+  }
+  const minCtx = parseInt(minCtxInput.value);
+  if (minCtx > 0) {
+    rows = rows.filter(r => parseFloat(r.context) >= minCtx);
+  }
+  // Per-column filters
+  for (const [col, val] of Object.entries(colFilters)) {
+    if (!val) continue;
+    const v = val.toLowerCase();
+    rows = rows.filter(r => String(r[col] ?? "").toLowerCase().includes(v));
+  }
+  filteredRows = rows;
+  currentPage = 0;
+}
+
+// -- Sorting --
+function sortBy(col) {
+  if (sortCol === col) sortAsc = !sortAsc;
+  else { sortCol = col; sortAsc = true; }
+  const numCol = NUM_FIELDS.has(col);
+  filteredRows.sort((a, b) => {
+    let va = a[col] ?? "", vb = b[col] ?? "";
+    if (numCol) { va = parseFloat(va) || 0; vb = parseFloat(vb) || 0; }
+    else { va = String(va).toLowerCase(); vb = String(vb).toLowerCase(); }
+    if (va < vb) return sortAsc ? -1 : 1;
+    if (va > vb) return sortAsc ? 1 : -1;
+    return 0;
+  });
+  renderTable();
+}
+
+// -- Rendering --
+function showTable() {
+  dropZone.style.display = "none";
+  if (!document.getElementById("tableWrap")) {
+    contentArea.innerHTML = `
+      <div class="table-wrap" id="tableWrap"><table><thead></thead><tbody></tbody></table></div>
+      <div class="pagination" id="pagination"></div>
+    `;
+  }
+  renderTable();
+}
+
+function renderTable() {
+  const thead = contentArea.querySelector("thead");
+  const tbody = contentArea.querySelector("tbody");
+
+  // Header row
+  let hdr = "<tr>" + visibleCols.map(c => {
+    const arrow = sortCol === c ? (sortAsc ? "▲" : "▼") : "⇅";
+    const cls = sortCol === c ? "active" : "";
+    return `<th data-col="${c}">${c}<span class="sort-arrow ${cls}">${arrow}</span></th>`;
+  }).join("") + "</tr>";
+  // Filter row
+  hdr += "<tr class=\"filter-row\">" + visibleCols.map(c =>
+    `<th><input type="text" data-col="${c}" placeholder="…" value="${colFilters[c] || ""}"></th>`
+  ).join("") + "</tr>";
+  thead.innerHTML = hdr;
+
+  // Bind header clicks
+  thead.querySelectorAll("tr:first-child th").forEach(th => {
+    th.addEventListener("click", () => sortBy(th.dataset.col));
+  });
+  // Bind filter inputs
+  thead.querySelectorAll(".filter-row input").forEach(inp => {
+    inp.addEventListener("input", debounce(() => {
+      colFilters[inp.dataset.col] = inp.value;
+      applyFilters(); renderTable();
+    }, 150));
+  });
+
+  // Body rows (paginated)
+  const start = currentPage * pageSize;
+  const pageRows = filteredRows.slice(start, start + pageSize);
+  tbody.innerHTML = pageRows.map((row, i) => {
+    const idx = start + i;
+    const cls = idx === selectedIdx ? "selected" : "";
+    return `<tr class="${cls}" data-idx="${idx}">` +
+      visibleCols.map(c => {
+        const v = row[c] ?? "";
+        const isNum = NUM_FIELDS.has(c) && v !== "";
+        return `<td class="${isNum ? "num" : ""}" title="${escHtml(String(v))}">${escHtml(String(v))}</td>`;
+      }).join("") + "</tr>";
+  }).join("");
+
+  // Bind row clicks
+  tbody.querySelectorAll("tr").forEach(tr => {
+    tr.addEventListener("click", () => {
+      selectedIdx = parseInt(tr.dataset.idx);
+      showDetail(selectedIdx);
+      tbody.querySelectorAll("tr").forEach(t => t.classList.remove("selected"));
+      tr.classList.add("selected");
+    });
+  });
+
+  // Pagination
+  renderPagination();
+  // Status
+  statusbar.innerHTML = `<span>Showing ${start+1}–${Math.min(start+pageSize, filteredRows.length)} of ${filteredRows.length} (${flatRows.length} total)</span>`;
+}
+
+function renderPagination() {
+  const totalPages = Math.ceil(filteredRows.length / pageSize);
+  const pag = document.getElementById("pagination");
+  if (!pag) return;
+  pag.innerHTML = `
+    <button class="btn" ${currentPage === 0 ? "disabled" : ""} id="prevPage">← Prev</button>
+    <span>Page ${currentPage + 1} / ${totalPages || 1}</span>
+    <button class="btn" ${currentPage >= totalPages - 1 ? "disabled" : ""} id="nextPage">Next →</button>
+    <select id="pageSizeSelect">${PAGE_SIZE_OPTIONS.map(n => `<option value="${n}" ${n===pageSize?"selected":""}>${n} / page</option>`).join("")}</select>
+  `;
+  const prev = document.getElementById("prevPage");
+  const next = document.getElementById("nextPage");
+  const psel = document.getElementById("pageSizeSelect");
+  prev.addEventListener("click", () => { if (currentPage > 0) { currentPage--; renderTable(); }});
+  next.addEventListener("click", () => { if (currentPage < totalPages - 1) { currentPage++; renderTable(); }});
+  psel.addEventListener("change", () => { pageSize = parseInt(psel.value); currentPage = 0; renderTable(); });
+}
+
+function showDetail(idx) {
+  const rec = allRecords[idx];
+  if (!rec) return;
+  detailPanel.classList.add("open");
+  const title = rec.name || rec.raw_id || rec.key || `Record ${idx}`;
+  $("#detailTitle").textContent = title;
+  $("#detailJson").textContent = JSON.stringify(rec, null, 2);
+}
+
+// -- Utils --
+function escHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+function debounce(fn, ms) {
+  let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+function resetFilters() {
+  searchInput.value = ""; minCtxInput.value = "";
+  routeFilter.selectedIndex = -1;
+  activeCaps.clear();
+  $$(".chip").forEach(c => c.classList.remove("active"));
+  colFilters = {};
+  sortCol = null; sortAsc = true;
+  applyFilters(); renderTable();
+}
+
+// Keyboard shortcut: Escape closes detail
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") detailPanel.classList.remove("open");
+});
+</script>
+</body>
+</html>

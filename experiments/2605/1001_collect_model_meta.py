@@ -331,10 +331,12 @@ def cmd_show(args: argparse.Namespace) -> None:
 
 def cmd_app(args: argparse.Namespace) -> None:
   run = Path(args.run_dir)
-  app = write_app(run)
-  cmd = [sys.executable, "-m", "streamlit", "run", str(app), "--", str(run)]
-  print(" ".join(cmd))
-  subprocess.run(cmd, check=True)
+  viewer = Path(__file__).resolve().parent / "viewer.html"
+  print(f"Open {viewer} in a browser, then load:")
+  print(f"  JSONL: {run / 'normalized' / 'modelsdev_records.jsonl'}")
+  print(f"  CSV:   {run / 'normalized' / 'modelsdev_records.csv'}")
+  import webbrowser
+  webbrowser.open(viewer.as_uri())
 
 
 def main(argv: list[str] | None = None) -> None:
