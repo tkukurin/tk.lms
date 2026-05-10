@@ -13,15 +13,13 @@ Starting points and related sources found during reconnaissance:
 - `Aider-AI/aider` — agent-facing consumer of LLM metadata; likely useful as a downstream sanity check rather than a primary source because it depends heavily on LiteLLM-style model naming.[^aider]
 - Non-repo APIs worth adding as first-class adapters: OpenRouter `/api/v1/models`, Models.dev `/api.json`, Vercel AI Gateway model catalog, provider-owned docs/APIs where stable.
 
-No published academic baseline seems required for this first phase: the task is an engineering data quality experiment, not model evaluation.
-
 ## Approach
 
 ### Step 1: Define the normalized model record
 
 Create a source-independent record that preserves both raw source data and normalized fields:
 
-- identity: `source`, `serving_provider`, `raw_model_id`, `canonical_model_key`, aliases, route/region/variant
+- identity: `source`, `provider`, `raw_id`, route-level `key`, optional `underlying_key`, aliases, route/region/variant
 - limits: context, input, output, max tokens, tier-specific limits
 - costs: input/output/cache-read/cache-write/reasoning/audio/image/video, normalized to USD per 1M tokens where possible
 - capabilities: tool calling, structured output, JSON/response schema, reasoning, reasoning effort levels, attachments, modalities, web search, prompt caching, system messages, parallel tools
@@ -30,6 +28,68 @@ Create a source-independent record that preserves both raw source data and norma
 - provenance: repository URL, file path, commit hash, commit date, commit message, extraction timestamp, parser version
 
 Keep raw fields alongside normalized fields so every discrepancy can be traced back to the source value.
+
+Critique of the first sketch:
+
+- `src` conflates adapter provenance with provider route identity.
+- `caps: set[...]` loses the false/unknown distinction.
+- `limits` and `costs_1m` are right as dicts, but need fixed keys and units.
+- `meta: dict[str, str]` is too narrow for dates, booleans, lists, and numbers.
+- `raw` is not provenance; normalized rows need openable source location data.
+- Provider route and underlying model are distinct facts. OpenRouter, Bedrock,
+  Vertex, and first-party records may legitimately differ.
+
+Updated suggestion, still one shallow type plus one capability alias:
+
+```python
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+Capability = Literal[
+    "tools", "parallel_tools", "structured_output", "json_mode",
+    "reasoning", "reasoning_effort", "prompt_cache", "system_message",
+    "web_search", "attachments", "vision_input", "audio_input", "audio_output",
+]
+
+@dataclass
+class NormalizedRecord:
+    source: str
+    provider: str
+    raw_id: str
+    key: str
+    underlying_key: str | None = None
+    aliases: list[str] = field(default_factory=list)
+    capabilities: dict[Capability, bool] = field(default_factory=dict)
+    limits: dict[str, int] = field(default_factory=dict)
+    costs_usd_1m: dict[str, float] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
+    provenance: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict)
+```
+
+Conventions:
+
+- `source`: adapter/source, e.g. `litellm_repo`, `modelsdev_api`.
+- `provider`: normalized route/provider, e.g. `openai`, `openrouter`, `bedrock`.
+- `key`: route-level comparison key, usually `{provider}/{normalized_raw_id}`.
+- `underlying_key`: first-party model key only when confidently known.
+- `capabilities`: missing means unknown; `False` means explicitly unsupported.
+- `limits`: token counts; expected keys: `context`, `input`, `output`,
+  `max_completion`, `batch_context`.
+- `costs_usd_1m`: USD per 1M units; expected keys: `input`, `output`,
+  `cache_read`, `cache_write`, `reasoning`, `audio_input`, `audio_output`,
+  `image_input`, `image_output`, `video_input`.
+- `meta`: normalized extras; expected keys include `input_modalities`,
+  `output_modalities`, `endpoint`, `base_url`, `region`, `route_variant`,
+  `release_date`, `knowledge_cutoff`, `updated_at`, `status`,
+  `deprecation_date`, `tier`.
+- `provenance`: repository/API URL, path, commit, extraction timestamp, parser.
+- `raw`: original payload or minimally extracted source row.
+
+Keep `key` route-specific by default. Use `underlying_key` only from adapter facts
+or an explicit high-confidence alias map. Compare route facts (`costs_usd_1m`,
+regional limits) separately from underlying-model facts (`release_date`, broad
+modalities).
 
 ### Step 2: Build source adapters
 
