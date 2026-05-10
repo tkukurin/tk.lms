@@ -37,6 +37,7 @@ PARSER = "modelsdev_api.v0"
 MODELS_UA = "tk-model-meta-crawler/0.1"
 VIBES_UA = "tk-vibes-collector/0.1"
 HN_API = "https://hn.algolia.com/api/v1/search_by_date"
+RESOLVER_VERSION = "v3-conservative-version-phrase"
 
 Capability = Literal[
   "tools", "parallel_tools", "structured_output", "json_mode",
@@ -717,14 +718,17 @@ def get_resolve_items(signals: list[Any]) -> list[dict[str, Any]]:
 
 
 def get_resolve_messages(
-  catalog: list[dict[str, Any]], batch: list[dict[str, Any]], min_conf: float,
+  catalog: list[dict[str, Any]], batch: list[dict[str, Any]], args: argparse.Namespace,
 ) -> list[dict[str, str]]:
+  n = args.max_keys if args.allow_multi else 1
   system = (
-    "Map vibe comments to model catalog keys. Return strict JSON only. "
-    "Schema: {mappings:[{signal_id:string,resolved_model_keys:string[],"
-    "confidence:number,reason:string}]}. Only use catalog keys. Return at most "
-    "3 keys per signal; don't list route/wrapper variants. Use [] when "
-    f"ambiguous or confidence < {min_conf}."
+    "Map vibe comments to canonical model catalog keys. Return strict compact "
+    "JSON only: {mappings:[{signal_id:string,resolved_model_keys:string[],"
+    "confidence:number,reason_code:string}]}. current_model_key is noisy; "
+    "do not use it as evidence. Use only explicit text mentions. Do not map "
+    "broad family mentions to versioned keys unless the version appears in "
+    f"text. Return at most {n} key(s). Use [] when ambiguous or confidence "
+    f"< {args.min_confidence}. No prose."
   )
   return [{"role": "system", "content": system}, {"role": "user", "content":
     json.dumps({"catalog": catalog, "signals": batch}, ensure_ascii=False)}]
@@ -782,7 +786,7 @@ def get_completion_json(
   import litellm
   r = litellm.completion(
     model=args.model, messages=messages, temperature=0,
-    response_format={"type": "json_object"},
+    response_format={"type": "json_object"}, max_tokens=args.max_output_tokens,
   )
   u = getattr(r, "usage", {}) or {}
   in_t = get_usage_value(u, "prompt_tokens", "input_tokens") or prompt_tokens or 0
@@ -796,23 +800,42 @@ def get_completion_json(
   return json.loads(r.choices[0].message.content or "{}")
 
 
+def has_version_evidence(key: str, text: str) -> bool:
+  low = re.sub(r"[^a-z0-9]+", " ", text.lower())
+  norm_key = re.sub(r"[^a-z0-9]+", " ", key.lower())
+  specials = re.findall(r"\b(?:o\d|\d+[a-z]+)\b", norm_key)
+  if specials: return all(re.search(rf"\b{re.escape(x)}\b", low) for x in specials)
+  nums = [n for n in re.findall(r"\d+", key) if len(n) < 6]
+  return not nums or re.search(rf"\b{' '.join(nums)}\b", low) is not None
+
+
 def sanitize_resolutions(
-  rows: list[dict[str, Any]], keys: set[str], max_keys: int,
+  rows: list[dict[str, Any]], keys: set[str], args: argparse.Namespace,
+  batch: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+  by_id = {x["signal_id"]: x for x in batch}
   out = []
   for r in rows:
+    conf = float(r.get("confidence") or 0)
+    text = by_id.get(str(r.get("signal_id")), {}).get("text", "")
     xs = [k for k in r.get("resolved_model_keys", []) if k in keys]
-    if len(xs) > max_keys:
+    xs = [k for k in xs if has_version_evidence(k, text)]
+    if conf < args.min_confidence: xs = []
+    if not args.allow_multi and len(xs) > 1:
       xs = []
-      r = {**r, "confidence": 0, "reason": "too many candidate keys"}
+      r = {**r, "confidence": 0, "reason_code": "too_many_keys"}
+    if len(xs) > args.max_keys:
+      xs = []
+      r = {**r, "confidence": 0, "reason_code": "too_many_keys"}
     out.append({**r, "resolved_model_keys": xs})
   return out
 
 
 def get_cache_path(args: argparse.Namespace, batch: list[dict[str, Any]]) -> Path:
   payload = {"model": args.model, "catalog": args.catalog_hash,
-             "min_conf": args.min_confidence, "max_keys": args.max_keys,
-             "batch": batch}
+             "version": RESOLVER_VERSION, "min_conf": args.min_confidence,
+             "max_keys": args.max_keys, "allow_multi": args.allow_multi,
+             "max_output_tokens": args.max_output_tokens, "batch": batch}
   key = hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()
   return args.cache_dir / f"{key}.json"
 
@@ -844,12 +867,13 @@ def resolve_batch(args: argparse.Namespace, catalog: list[dict[str, Any]],
                   batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
   if cached := get_cached(args, batch): return cached
   keys = {m["key"] for m in catalog}
-  messages = get_resolve_messages(catalog, batch, args.min_confidence)
+  messages = get_resolve_messages(catalog, batch, args)
   n = count_tokens(args.model, messages)
   if n and n > args.max_tokens and len(batch) > 1:
     mid = len(batch) // 2
-    return (resolve_batch(args, catalog, batch[:mid]) +
+    rows = (resolve_batch(args, catalog, batch[:mid]) +
             resolve_batch(args, catalog, batch[mid:]))
+    return save_cache(args, batch, rows)
   if n and n > args.max_tokens:
     print(f"warning: one-signal batch has {n} tokens", file=sys.stderr)
   if args.dry_run:
@@ -860,13 +884,14 @@ def resolve_batch(args: argparse.Namespace, catalog: list[dict[str, Any]],
     print(f"warning: resolver batch failed: {e}", file=sys.stderr)
     if len(batch) > 1:
       mid = len(batch) // 2
-      return (resolve_batch(args, catalog, batch[:mid]) +
+      rows = (resolve_batch(args, catalog, batch[:mid]) +
               resolve_batch(args, catalog, batch[mid:]))
+      return save_cache(args, batch, rows)
     rows = [{"signal_id": batch[0]["signal_id"], "resolved_model_keys": [],
              "confidence": 0, "reason": f"resolver failed: {e}"}]
     return save_cache(args, batch, rows)
   rows = data.get("mappings", data if isinstance(data, list) else [])
-  return save_cache(args, batch, sanitize_resolutions(rows, keys, args.max_keys))
+  return save_cache(args, batch, sanitize_resolutions(rows, keys, args, batch))
 
 
 def mv_resolved_signals(
@@ -1132,8 +1157,10 @@ def build_parser() -> argparse.ArgumentParser:
   resolve.add_argument("--model", default="gemini/gemini-2.5-flash")
   resolve.add_argument("--batch-size", type=int, default=100)
   resolve.add_argument("--max-tokens", type=int, default=800_000)
+  resolve.add_argument("--max-output-tokens", type=int, default=8192)
   resolve.add_argument("--min-confidence", type=float, default=0.65)
-  resolve.add_argument("--max-keys", type=int, default=3)
+  resolve.add_argument("--max-keys", type=int, default=1)
+  resolve.add_argument("--allow-multi", action="store_true")
   resolve.add_argument("--limit", type=int, default=0)
   resolve.add_argument("--cache-dir", type=Path)
   resolve.add_argument("--no-cache", action="store_true")
