@@ -24,11 +24,14 @@ dependencies = [
     "matplotlib",
     "scipy",
     "pandas",
+    "streamlit",
     "einops",
     "evaluate",
     "pytest",
     "loguru",
+    "litellm>=1.75.0",
     "tokenizers",
+    "tqdm",
     "hydra-core",
     "penzai",
     "xminigrid",
@@ -50,6 +53,7 @@ dependencies = [
     "wandb>=0.19.1",
     "ml-collections>=1.0.0",
     "wrapt>=1.17.0",
+    "guidellm[deploy,recommended]>=0.6.0",
 ]
 
 [project.optional-dependencies]

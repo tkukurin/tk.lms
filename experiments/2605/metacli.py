@@ -727,8 +727,8 @@ def get_resolve_messages(
     "confidence:number,reason_code:string}]}. current_model_key is noisy; "
     "do not use it as evidence. Use only explicit text mentions. Do not map "
     "broad family mentions to versioned keys unless the version appears in "
-    f"text. Return at most {n} key(s). Use [] when ambiguous or confidence "
-    f"< {args.min_confidence}. No prose."
+    f"text. Return at most {n} key(s). Use [] when ambiguous or unsure. "
+    f"No prose."
   )
   return [{"role": "system", "content": system}, {"role": "user", "content":
     json.dumps({"catalog": catalog, "signals": batch}, ensure_ascii=False)}]
@@ -797,7 +797,16 @@ def get_completion_json(
     "call_cost_usd": float(litellm.completion_cost(completion_response=r) or 0),
   }
   record_call(args, stats)
-  return json.loads(r.choices[0].message.content or "{}")
+  text = r.choices[0].message.content or "{}"
+  try: return json.loads(text)
+  except json.JSONDecodeError as e:
+    bad = args.outdir / f"bad_resolver_json.{args.calls}.txt"
+    bad.write_text(text, encoding="utf-8")
+    reason = getattr(r.choices[0], "finish_reason", "")
+    raise ValueError(
+      f"invalid resolver JSON ({e}); finish={reason}; "
+      f"chars={len(text)}; saved={bad}"
+    ) from e
 
 
 def has_version_evidence(key: str, text: str) -> bool:
@@ -820,7 +829,6 @@ def sanitize_resolutions(
     text = by_id.get(str(r.get("signal_id")), {}).get("text", "")
     xs = [k for k in r.get("resolved_model_keys", []) if k in keys]
     xs = [k for k in xs if has_version_evidence(k, text)]
-    if conf < args.min_confidence: xs = []
     if not args.allow_multi and len(xs) > 1:
       xs = []
       r = {**r, "confidence": 0, "reason_code": "too_many_keys"}
@@ -833,9 +841,8 @@ def sanitize_resolutions(
 
 def get_cache_path(args: argparse.Namespace, batch: list[dict[str, Any]]) -> Path:
   payload = {"model": args.model, "catalog": args.catalog_hash,
-             "version": RESOLVER_VERSION, "min_conf": args.min_confidence,
-             "max_keys": args.max_keys, "allow_multi": args.allow_multi,
-             "max_output_tokens": args.max_output_tokens, "batch": batch}
+             "version": RESOLVER_VERSION, "max_keys": args.max_keys,
+             "allow_multi": args.allow_multi, "max_output_tokens": args.max_output_tokens, "batch": batch}
   key = hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()
   return args.cache_dir / f"{key}.json"
 
@@ -866,6 +873,11 @@ def save_cache(
 def resolve_batch(args: argparse.Namespace, catalog: list[dict[str, Any]],
                   batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
   if cached := get_cached(args, batch): return cached
+  if len(batch) > args.max_call_batch:
+    mid = len(batch) // 2
+    rows = (resolve_batch(args, catalog, batch[:mid]) +
+            resolve_batch(args, catalog, batch[mid:]))
+    return save_cache(args, batch, rows)
   keys = {m["key"] for m in catalog}
   messages = get_resolve_messages(catalog, batch, args)
   n = count_tokens(args.model, messages)
@@ -917,10 +929,10 @@ def write_jsonl(path: Path, rows: list[Any]) -> Path:
 
 
 def write_resolution_outputs(
-  outdir: Path, signals: list[Any], resolutions: list[dict[str, Any]], min_conf: float,
+  outdir: Path, signals: list[Any], resolutions: list[dict[str, Any]]
 ) -> dict[str, Path]:
   outdir.mkdir(parents=True, exist_ok=True)
-  resolved, unresolved = mv_resolved_signals(signals, resolutions, min_conf)
+  resolved, unresolved = mv_resolved_signals(signals, resolutions)
   return {
     "resolutions": write_jsonl(outdir / "vibes_resolutions.jsonl", resolutions),
     "resolved": write_jsonl(outdir / "vibes_signals_resolved.jsonl", resolved),
@@ -1095,7 +1107,7 @@ def cmd_vibes_resolve(args: argparse.Namespace) -> None:
     for b in pbar: resolutions.extend(resolve_batch(args, catalog, b))
     args.pbar = None
   paths = write_resolution_outputs(
-    args.outdir, signals, resolutions, args.min_confidence,
+    args.outdir, signals, resolutions
   )
   summary = {"signals": len(signals), "items": len(items),
              "resolutions": len(resolutions), "calls": args.calls,
@@ -1156,9 +1168,9 @@ def build_parser() -> argparse.ArgumentParser:
   resolve.add_argument("--outdir", type=Path, default=Path("vibes-resolved"))
   resolve.add_argument("--model", default="gemini/gemini-2.5-flash")
   resolve.add_argument("--batch-size", type=int, default=100)
+  resolve.add_argument("--max-call-batch", type=int, default=10)
   resolve.add_argument("--max-tokens", type=int, default=800_000)
-  resolve.add_argument("--max-output-tokens", type=int, default=8192)
-  resolve.add_argument("--min-confidence", type=float, default=0.65)
+  resolve.add_argument("--max-output-tokens", type=int, default=None)
   resolve.add_argument("--max-keys", type=int, default=1)
   resolve.add_argument("--allow-multi", action="store_true")
   resolve.add_argument("--limit", type=int, default=0)
