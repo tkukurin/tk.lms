@@ -6,54 +6,97 @@
 #     "pyyaml"
 # ]
 # ///
-"""LiteLLM proxy: single OpenAI-compatible endpoint for bedrock/openai/anthropic/gemini.
+"""LiteLLM proxy: single OpenAI-compatible endpoint for bedrock/openai/anthropic/gemini/ollama.
 
-[Agenta (docker)] --> host.docker.internal:4000/v1 --> litellm --> provider APIs
-
-Routing: model_list wildcards map prefixes to backends.
-  model="openai/gpt-4o" -> OpenAI, model="bedrock/eu.X" -> Bedrock, etc.
-  Provider API keys read from env automatically.
+[Agenta (docker)] --> host.docker.internal:4100/v1 --> litellm --> provider APIs
 
 Env vars:
   OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY  - provider keys
   AWS credentials (SSO/profile/env)                  - bedrock
+  OLLAMA_BASE_URL                                    - defaults to http://localhost:8888
   AGENTA_API_KEY                                     - push command only
-
-Agenta config (created by `push`):
-  base_url: http://host.docker.internal:4000/v1  (must end /v1, no trailing /)
-  api_key:  sk-local-proxy-key
-  kind:     openai (OpenAI-compatible custom provider)
 """
 import os
 import sys
 import json
+import socket
 import argparse
 import subprocess
 import urllib.request
+from dataclasses import dataclass
 
 import yaml
 import boto3
 import litellm
 from litellm.proxy.proxy_cli import run_server
 
-API_KEY = "sk-local-proxy-key"
-HOST = "0.0.0.0"
-PORT = 4000
-BASE_URL = f"http://127.0.0.1:{PORT}/v1"
-DOCKER_URL = f"http://host.docker.internal:{PORT}/v1"
-TEST_MODEL = "bedrock/eu.amazon.nova-micro-v1:0"
-AGENTA_URL = "http://localhost/api"
-AGENTA_CONTAINER = "agenta-oss-gh-services-1"
 
-PROVIDERS = ["openai", "anthropic", "gemini", "bedrock"]
+@dataclass(frozen=True)
+class ProxyConfig:
+    """All derived URLs flow from port. Change port, everything updates."""
+    host: str = "0.0.0.0"
+    port: int = 4100
+    api_key: str = "sk-local-proxy-key"
+    ollama_base_url: str = "http://localhost:8888"
+    agenta_url: str = "http://localhost/api"
+    agenta_container: str = "agenta-oss-gh-services-1"
+
+    @property
+    def base_url(self): return f"http://127.0.0.1:{self.port}/v1"
+
+    @property
+    def docker_url(self): return f"http://host.docker.internal:{self.port}/v1"
 
 
-def get_bedrock_region():
-    session = boto3.Session()
-    return session.region_name or "eu-central-1"
+def port_owner(port: int) -> str | None:
+    """Process name holding the port, or None if free."""
+    r = subprocess.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    pid = r.stdout.strip().split("\n")[0]
+    r2 = subprocess.run(["ps", "-p", pid, "-o", "comm="], capture_output=True, text=True)
+    return r2.stdout.strip() or f"pid {pid}"
 
 
-def get_live_models():
+def agenta_configured_url(cfg: ProxyConfig) -> str | None:
+    """Returns base_url agenta has stored for litellm-proxy, or None."""
+    try:
+        resp = json.loads(urllib.request.urlopen(f"{cfg.agenta_url}/vault/v1/secrets/", timeout=3).read())
+        for s in resp:
+            if s.get("header", {}).get("name") == "litellm-proxy":
+                return s["secret"]["data"]["provider"]["url"]
+    except (urllib.error.URLError, OSError, KeyError):
+        pass
+    return None
+
+
+def build_config(cfg: ProxyConfig):
+    """Probes providers, returns (litellm_config, active_names, warnings)."""
+    model_list = []
+    active = []
+    warnings = []
+
+    for name, key_var in [("openai", "OPENAI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY"), ("gemini", "GEMINI_API_KEY")]:
+        if os.environ.get(key_var):
+            model_list.append({"model_name": f"{name}/*", "litellm_params": {"model": f"{name}/*"}})
+            active.append(name)
+
+    region = boto3.Session().region_name or "eu-central-1"
+    model_list.append({"model_name": "bedrock/*", "litellm_params": {"model": "bedrock/*", "aws_region_name": region}})
+    active.append("bedrock")
+
+    try:
+        urllib.request.urlopen(f"{cfg.ollama_base_url}/api/tags", timeout=3)
+        model_list.append({"model_name": "ollama/*", "litellm_params": {"model": "ollama/*", "api_base": cfg.ollama_base_url}})
+        active.append("ollama")
+    except (urllib.error.URLError, OSError):
+        warnings.append(f"ollama: {cfg.ollama_base_url} unreachable (tunnel running?)")
+
+    config = {"model_list": model_list, "general_settings": {"master_key": cfg.api_key}}
+    return config, active, warnings
+
+
+def get_live_models(cfg: ProxyConfig):
     """Query each provider API for actually available models. Returns set of canonical names."""
     live = set()
 
@@ -93,12 +136,19 @@ def get_live_models():
         if m.get("modelLifecycle", {}).get("status") == "ACTIVE":
             live.add(f"bedrock/eu.{m['modelId']}")
 
+    try:
+        resp = json.loads(urllib.request.urlopen(f"{cfg.ollama_base_url}/api/tags", timeout=5).read())
+        for m in resp.get("models", []):
+            live.add(f"ollama/{m['name']}")
+    except (urllib.error.URLError, OSError):
+        pass
+
     return live
 
 
-def discover_models():
+def discover_models(cfg: ProxyConfig):
     """Cross-reference live provider models with litellm cost map. Sorted by input cost."""
-    live = get_live_models()
+    live = get_live_models(cfg)
     cost_map = {}
     for name, info in litellm.model_cost.items():
         if name == "sample_spec" or info.get("mode") != "chat": continue
@@ -128,94 +178,116 @@ def discover_models():
     return models
 
 
-def build_config():
-    region = get_bedrock_region()
-    model_list = [
-        {"model_name": "bedrock/*", "litellm_params": {"model": "bedrock/*", "aws_region_name": region}},
-        {"model_name": "openai/*", "litellm_params": {"model": "openai/*"}},
-        {"model_name": "anthropic/*", "litellm_params": {"model": "anthropic/*"}},
-        {"model_name": "gemini/*", "litellm_params": {"model": "gemini/*"}},
-    ]
-    return {"model_list": model_list, "general_settings": {"master_key": API_KEY}}, region
+def cmd_serve(cfg: ProxyConfig):
+    owner = port_owner(cfg.port)
+    if owner:
+        sys.exit(f"error: port {cfg.port} in use by: {owner}")
 
+    config, active, warnings = build_config(cfg)
 
-def cmd_serve(args):
-    config, region = build_config()
+    agenta_url = agenta_configured_url(cfg)
+    if agenta_url and agenta_url != cfg.docker_url:
+        warnings.append(f"agenta expects {agenta_url} but proxy will serve {cfg.docker_url} — run `push` to fix")
+
+    for w in warnings:
+        print(f"  WARN  {w}")
+
     with open("litellm_config.yaml", "w") as f:
         yaml.dump(config, f)
 
-    active = [p for p in PROVIDERS if p == "bedrock" or os.environ.get(f"{p.upper()}_API_KEY")]
-    print(f"providers:  {', '.join(active)} (region={region})")
-    print(f"host url:   {BASE_URL}")
-    print(f"docker url: {DOCKER_URL}")
-    print(f"api key:    {API_KEY}\n")
-    run_server(args=["--config", "litellm_config.yaml", "--host", HOST, "--port", str(PORT)], standalone_mode=False)
+    print(f"providers:  {', '.join(active)}")
+    print(f"host url:   {cfg.base_url}")
+    print(f"docker url: {cfg.docker_url}")
+    print(f"api key:    {cfg.api_key}\n")
+    run_server(args=["--config", "litellm_config.yaml", "--host", cfg.host, "--port", str(cfg.port)], standalone_mode=False)
 
 
-def cmd_test(args):
-    print(f"host test ({BASE_URL})")
+def cmd_test(cfg: ProxyConfig):
+    print(f"host test ({cfg.base_url})")
     resp = litellm.completion(
-        model=TEST_MODEL, messages=[{"role": "user", "content": "Say 'hi'"}],
-        max_tokens=5, api_base=BASE_URL, api_key=API_KEY, custom_llm_provider="openai",
+        model="bedrock/eu.amazon.nova-micro-v1:0",
+        messages=[{"role": "user", "content": "Say 'hi'"}],
+        max_tokens=5, api_base=cfg.base_url, api_key=cfg.api_key, custom_llm_provider="openai",
     )
     print(f"  chat: {resp.choices[0].message.content}")
 
 
-def cmd_docker(args):
+def cmd_docker(cfg: ProxyConfig):
     code = (
         "import urllib.request,json;"
-        f"req=urllib.request.Request('{DOCKER_URL}/chat/completions',"
-        f"data=json.dumps({{'model':'{TEST_MODEL}','messages':[{{'role':'user','content':'hi'}}],'max_tokens':5}}).encode(),"
-        f"headers={{'Authorization':'Bearer {API_KEY}','Content-Type':'application/json'}});"
+        f"req=urllib.request.Request('{cfg.docker_url}/chat/completions',"
+        f"data=json.dumps({{'model':'bedrock/eu.amazon.nova-micro-v1:0','messages':[{{'role':'user','content':'hi'}}],'max_tokens':5}}).encode(),"
+        f"headers={{'Authorization':'Bearer {cfg.api_key}','Content-Type':'application/json'}});"
         "print(json.loads(urllib.request.urlopen(req,timeout=10).read())['choices'][0]['message']['content'])"
     )
-    r = subprocess.run(["docker", "exec", AGENTA_CONTAINER, "python", "-c", code], capture_output=True, text=True)
-    print(f"docker test ({DOCKER_URL})")
+    r = subprocess.run(["docker", "exec", cfg.agenta_container, "python", "-c", code], capture_output=True, text=True)
+    print(f"docker test ({cfg.docker_url})")
     if r.returncode == 0: print(f"  chat: {r.stdout.strip()}")
     else: print(f"  FAIL: {r.stderr.strip()}")
 
 
-def cmd_models(args):
-    models = discover_models()
-    n = args.top or 20
-    print(f"cheapest {n} chat models (input $/1M tok):\n")
-    for name, inp, out in models[:n]:
+def cmd_models(cfg: ProxyConfig, top: int = 20):
+    models = discover_models(cfg)
+    print(f"cheapest {top} chat models (input $/1M tok):\n")
+    for name, inp, out in models[:top]:
         print(f"  ${inp*1e6:>7.2f} / ${out*1e6:>7.2f}  {name}")
-    print(f"\ntotal: {len(models)} models across {', '.join(PROVIDERS)}")
+    print(f"\ntotal: {len(models)} models")
 
 
-def cmd_push(args):
-    agenta_api_key = args.agenta_api_key or os.environ.get("AGENTA_API_KEY", "")
+def find_existing_secret(cfg: ProxyConfig, agenta_api_key: str) -> str | None:
+    """Returns secret ID for 'litellm-proxy' if it exists in agenta vault."""
+    req = urllib.request.Request(
+        f"{cfg.agenta_url}/vault/v1/secrets/",
+        headers={"Authorization": f"ApiKey {agenta_api_key}"},
+    )
+    try:
+        resp = json.loads(urllib.request.urlopen(req, timeout=5).read())
+        for s in resp:
+            if s.get("header", {}).get("name") == "litellm-proxy":
+                return s["id"]
+    except (urllib.error.URLError, OSError, KeyError):
+        pass
+    return None
+
+
+def cmd_push(cfg: ProxyConfig, agenta_api_key: str):
     if not agenta_api_key:
         sys.exit("need --agenta-api-key or AGENTA_API_KEY env (create in Agenta UI: Settings > API Keys)")
 
-    all_models = discover_models()
+    all_models = discover_models(cfg)
     model_names = [m[0] for m in all_models]
-    provider_name = "litellm-proxy"
 
     payload = {
-        "header": {"name": provider_name},
+        "header": {"name": "litellm-proxy"},
         "secret": {
             "kind": "custom_provider",
             "data": {
-                "kind": "openai",
-                "provider": {"url": DOCKER_URL, "key": API_KEY},
+                "kind": "custom",
+                "provider": {"url": cfg.docker_url, "key": cfg.api_key},
                 "models": [{"slug": m} for m in model_names],
             },
         },
     }
 
-    print(f"pushing {len(model_names)} models as '{provider_name}' to {AGENTA_URL}")
+    existing_id = find_existing_secret(cfg, agenta_api_key)
+    if existing_id:
+        url = f"{cfg.agenta_url}/vault/v1/secrets/{existing_id}"
+        method = "PUT"
+    else:
+        url = f"{cfg.agenta_url}/vault/v1/secrets/"
+        method = "POST"
+
+    print(f"{'updating' if existing_id else 'creating'} 'litellm-proxy' ({len(model_names)} models) at {cfg.agenta_url}")
     req = urllib.request.Request(
-        f"{AGENTA_URL}/vault/v1/secrets/",
+        url,
         data=json.dumps(payload).encode(),
         headers={"Authorization": f"ApiKey {agenta_api_key}", "Content-Type": "application/json"},
-        method="POST",
+        method=method,
     )
     try:
         resp = urllib.request.urlopen(req, timeout=15)
         result = json.loads(resp.read())
-        print(f"  OK - secret id: {result.get('id', '?')}")
+        print(f"  OK - secret id: {result.get('id', existing_id or '?')}")
         print(f"  cheapest 5:")
         for name, inp, out in all_models[:5]:
             print(f"    ${inp*1e6:.2f}/${out*1e6:.2f}  {name}")
@@ -225,6 +297,10 @@ def cmd_push(args):
 
 
 if __name__ == "__main__":
+    cfg = ProxyConfig(
+        ollama_base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:8888"),
+    )
+
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd")
     sub.add_parser("serve", help="start litellm proxy (default)")
@@ -237,4 +313,10 @@ if __name__ == "__main__":
 
     args = p.parse_args()
     cmd = args.cmd or "serve"
-    {"serve": cmd_serve, "test": cmd_test, "docker": cmd_docker, "models": cmd_models, "push": cmd_push}[cmd](args)
+    {
+        "serve": lambda: cmd_serve(cfg),
+        "test": lambda: cmd_test(cfg),
+        "docker": lambda: cmd_docker(cfg),
+        "models": lambda: cmd_models(cfg, top=args.top if hasattr(args, "top") else 20),
+        "push": lambda: cmd_push(cfg, agenta_api_key=getattr(args, "agenta_api_key", None) or os.environ.get("AGENTA_API_KEY", "")),
+    }[cmd]()
