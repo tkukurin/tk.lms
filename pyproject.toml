@@ -60,6 +60,8 @@ bnb = [
     # https://discuss.python.org/t/uv-adds-feature-to-resolve-for-other-platforms/51513
     "bitsnbytes>=1.0.0",
 ]
+# mainly dspy tuto asof 26-06
+lmsys = ["dspy>=3.2.1", "spacy>=3.8.14", "wikipedia>=1.4.0"]
 
 [tool.pixi.project]
 channels = ["conda-forge"]
@@ -75,6 +77,14 @@ build-backend = "setuptools.build_meta"
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
+typeCheckingMode = "standard"
+include = ["src", "experiments", "nbs"]
+exclude = ["data", "build", ".venv", ".github", "**/__pycache__"]
+executionEnvironments = [
+    { root = "src" },
+    { root = "experiments" },
+    { root = "nbs", reportUnknownMemberType = "none", reportUnknownVariableType = "none", reportUnknownArgumentType = "none" },
+]
 
 [tool.yapf]
 based_on_style = "google"
