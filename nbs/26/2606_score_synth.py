@@ -2,20 +2,22 @@
 
 Q1: Does predicting exact scores (two classifiers: home_goals, away_goals)
     then deriving outcome beat direct 3-way classification?
-Q2: Does diverse counterfactual augmentation (from 2606_simulate_synth.py)
-    improve multi-output prediction?
+Q2: Does diverse counterfactual augmentation (forward+inverse from
+    2606_simulate_synth.py) improve multi-output prediction?
 
 (NB tentative results; need to double check LLM implementation of my spec.)
 
-A1: YES on test. Multi-output clf gets 66.7% (vs 65.3% direct) AND solves
-    draws: 9/20 vs 0/20. Exact score ~14%. Regression terrible (35%).
-A2: TBD — rerunning with forward+inverse synthetic data.
+A1: YES. Multi-output clf best on test (66.7% vs 65.3% direct) AND solves
+    the draw problem (9/20 vs 0/20). Exact score ~14%.
+    Regression (GBR→round) terrible (35%).
+A2: NO. Diverse synth (31k, 6 forward gens + inverse) hurts: 52.8% test.
+    TabICL already saturates on 4.3k real rows.
 
-Results:
-  Q1a direct outcome:    valid=56.2% test=65.3%  draws=0/20
-  Q1b multi-output clf:  valid=50.8% test=66.7%  draws=9/20, 14% exact scores
-  Q1c GBR regression:    valid=39.1% test=34.7%  terrible
-  Q2  diverse synth:     TBD
+Results (WC 2026 test, 72 matches):
+  Q1a direct outcome:    56.2%/65.3%  draws=0/20
+  Q1b multi-output clf:  50.8%/66.7%  draws=9/20, exact=14%
+  Q1c GBR regression:    39.1%/34.7%  terrible
+  Q2  diverse synth:     48.4%/52.8%  hurts
 """
 # pyright: reportArgumentType=false, reportReturnType=false
 # %% Setup

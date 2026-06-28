@@ -1,9 +1,21 @@
 """Diverse synthetic data: forward counterfactuals + inverse feature generation.
 
-Forward: real matchup features → diverse score generators (Poisson, NegBin, RF, TabICL)
-Inverse: target score distribution → sample plausible feature vectors from real data
+Q: Does diverse synthetic training data (forward + inverse) help TabICL?
 
-Both facets use REAL team names and features. Self-eval at the end.
+Forward: real matchup features → 6 diverse score generators
+  (Poisson, NegBin, RF, TabICL self-play, with home-advantage sweep)
+Inverse: target score distribution → sampled features from matching
+  real matches (oversamples draws and tight games)
+
+(NB tentative; need to double check LLM implementation of my spec)
+
+Result: NO. real-only=66.7%, real+synth(31k)=52.8%. Still hurts.
+  Forward correlation (MV→GD) r=0.20 vs real r=0.31 — generators
+  produce weaker signal than reality. Inverse r=0.30 (better) but
+  volume (5k) too small relative to forward (26k).
+
+Conclusion: TabICL extracts max signal from 4.3k real rows already.
+  Synthetic data from any model ≤ TabICL quality dilutes context.
 
 Output: data/out/2606_synth_tournaments/matches.parquet
 """
