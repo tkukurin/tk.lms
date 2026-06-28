@@ -590,20 +590,19 @@ def _get_importance(t: str) -> int:
 
 def load_tm_features() -> dict[str, dict[int, list[float]]]:
     db: dict[str, dict[int, list[float]]] = {}
-    paths = [
-        (int(yd.name), tf)
-        for cd in TM_ROOT.iterdir()
-        if cd.is_dir() and not cd.name.startswith("_")
-        for yd in cd.iterdir()
-        if yd.is_dir() and (tf := yd / "team_features.json").exists()
-    ]
-    for year_val, tf_path in paths:
-        teams = json.loads(tf_path.read_text())
-        for _cid, feats in teams.items():
-            name_en = NAME_MAP.get(feats.get("name", ""),
-                feats.get("name", ""))
-            vec = [feats.get(c, 0) or 0 for c in ROSTER_COLS]
-            db.setdefault(name_en, {})[year_val] = vec
+    for cd in TM_ROOT.iterdir():
+        if not cd.is_dir() or cd.name.startswith("_"):
+            continue
+        for yd in cd.iterdir():
+            if not yd.is_dir():
+                continue
+            if not (tf := yd / "team_features.json").exists():
+                continue
+            for feats in json.loads(tf.read_text()).values():
+                name = NAME_MAP.get(feats.get("name", ""),
+                    feats.get("name", ""))
+                vec = [feats.get(c, 0) or 0 for c in ROSTER_COLS]
+                db.setdefault(name, {})[int(yd.name)] = vec
     return db
 
 
@@ -676,22 +675,7 @@ def compute_metrics(
     }
 
 
-def make_tabicl():
-    from huggingface_hub import hf_hub_download
-    from tabicl import TabICLClassifier
-    ckpt = Path(hf_hub_download(
-        repo_id="jingang/TabICL",
-        filename="tabicl-classifier-v2-20260212.ckpt",
-    ))
-    return TabICLClassifier(
-        model_path=ckpt, norm_methods=None,
-        feat_shuffle_method="latin", class_shuffle_method="shift",
-        outlier_threshold=4, support_many_classes=True, batch_size=8,
-        kv_cache=False, allow_auto_download=False,
-        checkpoint_version=ckpt.name,
-        use_amp="auto", use_fa3="auto", offload_mode="auto",
-        disk_offload_dir=None,
-    )
+
 
 
 COMMANDS: dict[str, Any] = {name.replace("_", "-"): name for name in ENDPOINTS}
