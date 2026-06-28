@@ -1,7 +1,7 @@
 """Query Transfermarkt's JSON API from notebooks or uv.
 
 Examples:
-  uv run python nbs/26/2606_tmapi_client.py search-transfermarkt "world cup"
+  uv run python nbs/26/2606_tmapi_client.py tmsearch "world cup"
   uv run python nbs/26/2606_tmapi_client.py get-competition-info FIWC
 
 See 538's [pele] (Predictive Elo with Lineup Equilibria) for infos on chosen features.
@@ -30,6 +30,7 @@ Apparently coding agent's favorite way to run:
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import math
 import time
@@ -74,12 +75,9 @@ class Endpoint:
     ids_query: bool = False
 
 
-ENDPOINTS: dict[str, Endpoint] = {
+ENDPOINTS = {
     "attributes": Endpoint("attributes"),
-    "search_transfermarkt": Endpoint(
-        "quick-search",
-        required_query=("term",),
-    ),
+    "tmsearch": Endpoint("quick-search", required_query=("term",)),
 }
 
 # %% Player endpoints
@@ -237,7 +235,7 @@ class TmClient:
         return self.fetch(get_endpoint(spec, params))
 
     attributes = partialmethod(call, "attributes")
-    search_transfermarkt = partialmethod(call, "search_transfermarkt")
+    tmsearch = partialmethod(call, "tmsearch")
 
     get_player_profile = partialmethod(call, "get_player_profile")
     get_players_info = partialmethod(call, "get_players_info")
@@ -662,9 +660,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--no-cache", action="store_true")
     args = parser.parse_args(argv)
     client = TmClient(timeout=args.timeout, ttl=args.ttl, use_cache=not args.no_cache)
-
-    name = COMMANDS[args.command]
-    if spec := ENDPOINTS.get(name):
+    if spec := ENDPOINTS.get(name := COMMANDS[args.command]):  # type: ignore
         names = [*spec.path_args, *spec.required_query]
         if spec.ids_query: names.append("ids")
         params = dict(zip(names, args.values, strict=True))
@@ -672,10 +668,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             params["ids"] = [part.strip() for part in args.values[-1].split(",")]
         if "season" in spec.optional_query:
             params["season"] = args.season
+        assert isinstance(name, str), f"{name=}"
         result = client.call(name, **params)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
-        name(client, )
+        assert callable(name), f"{name=}"
+        sig = inspect.signature(name)
+        avail = {"client": client, **{v: int(v) for v in args.values}}
+        kwargs = {k: avail[k] for k in sig.parameters if k in avail}
+        name(**kwargs)
     return 0
 
 
