@@ -1,18 +1,6 @@
 """TM API client, roster feature extraction, and match dataset for TabICL.
 
-CLI: python -m tk.nbs.footie fetch-all | pele 2022 | analyze
-
-Examples:
-  uv run python nbs/26/2606_tmapi_client.py tmsearch "world cup"
-  uv run python nbs/26/2606_tmapi_client.py get-competition-info FIWC
-  uv run python nbs/26/2606_tmapi_client.py fetch-all
-  uv run python nbs/26/2606_tmapi_client.py pele 2022
-  uv run python nbs/26/2606_tmapi_client.py analyze
-
-See 538's [pele] (Predictive Elo with Lineup Equilibria) for infos on chosen features.
-pele = fetch_fiwc_year =  fetch_comp_year(client, "FIWC", year, WORLD_CUP_START_DATES[year])
-
-[pele]: https://www.natesilver.net/p/pele-methodology
+See 538's [pele](https://www.natesilver.net/p/pele-methodology) for infos on chosen features.
 """
 
 from __future__ import annotations
@@ -54,10 +42,7 @@ WORLD_CUP_START_DATES = {
 }
 
 COMPETITIONS = {
-    "FIWC": {
-        2006: "2006-06-09", 2010: "2010-06-11", 2014: "2014-06-12",
-        2018: "2018-06-14", 2022: "2022-11-20", 2026: "2026-06-11",
-    },
+    "FIWC": WORLD_CUP_START_DATES,
     "EURO": {
         2008: "2008-06-07", 2012: "2012-06-08", 2016: "2016-06-10",
         2021: "2021-06-11", 2024: "2024-06-14",
@@ -94,7 +79,10 @@ ROSTER_COLS = [
 ]
 HOME_COLS = [f"h_{c}" for c in ROSTER_COLS]
 AWAY_COLS = [f"a_{c}" for c in ROSTER_COLS]
-FEAT_COLS = ["importance", "neutral"] + HOME_COLS + AWAY_COLS
+FEAT_COLS = ["date_ordinal", "importance", "neutral"] + HOME_COLS + AWAY_COLS
+
+VALID_CUT = "2018-01-01"
+TEST_CUT = "2026-06-01"
 
 TOURNAMENT_IMPORTANCE = {
     "Friendly": 1, "FIFA World Cup qualification": 3,
@@ -554,6 +542,7 @@ def fetch_comp_year(
     (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary
 
+
 def fetch_all(client: TmClient) -> None:
     for comp_id, years in COMPETITIONS.items():
         for year, cutoff in years.items():
@@ -582,14 +571,14 @@ def analyze(root: Path = TM_ROOT / "fiwc") -> None:
         top4_in_top8 = sum(1 for p in podium if p in names[:8])
         top4_in_top16 = sum(1 for p in podium if p in names[:16])
         rows.append({"year": year, "winnerValueRank": winner_rank, "top4inTop8value": top4_in_top8})
-        print(f"\n=== {year} ===")
+        print(f"\n{year}")
         print(f"  Winner: {winner} (value rank #{winner_rank}/{len(teams)})")
         print(f"  Podium in top-8 by value: {top4_in_top8}/4")
         print(f"  Podium in top-16 by value: {top4_in_top16}/4")
         print(f"  Top 5 by value: {names[:5]}")
         print(f"  Actual podium:  {podium}")
     if rows:
-        print(f"\n--- Summary across {len(rows)} tournaments ---")
+        print(f"\nSummary across {len(rows)} tournaments")
         print(f"  Avg winner value rank: {sum(r['winnerValueRank'] for r in rows) / len(rows):.1f}")
         print(f"  Avg podium in top-8: {sum(r['top4inTop8value'] for r in rows) / len(rows):.1f}/4")
 
@@ -602,7 +591,6 @@ def _get_importance(t: str) -> int:
 
 
 def load_tm_features() -> dict[str, dict[int, list[float]]]:
-    """Load all TM team features into {english_name: {year: vector}}."""
     db: dict[str, dict[int, list[float]]] = {}
     for comp_dir in TM_ROOT.iterdir():
         if not comp_dir.is_dir() or comp_dir.name.startswith("_"):
@@ -672,7 +660,48 @@ def load_match_dataset(tm_db: dict[str, dict[int, list[float]]] | None = None) -
     away_vecs = [v for v, k in zip(away_vecs, keep) if k]
     df[HOME_COLS] = pd.DataFrame(home_vecs, index=df.index)
     df[AWAY_COLS] = pd.DataFrame(away_vecs, index=df.index)
+    df["date_ordinal"] = pd.to_datetime(df["date"]).map(lambda d: d.toordinal())
     return df
+
+
+def compute_metrics(
+    pred_home: np.ndarray, pred_away: np.ndarray,
+    true_home: np.ndarray, true_away: np.ndarray,
+    true_outcome: np.ndarray,
+) -> dict[str, float]:
+    """Compute outcome acc, exact score acc, MAE, draw counts."""
+    pred_outcome = np.where(
+        pred_home > pred_away, 2,
+        np.where(pred_home == pred_away, 1, 0),
+    )
+    return {
+        "acc_outcome": (pred_outcome == true_outcome).mean(),
+        "exact_score": ((pred_home == true_home) & (pred_away == true_away)).mean(),
+        "mae_home": np.abs(pred_home - true_home).mean(),
+        "mae_away": np.abs(pred_away - true_away).mean(),
+        "n_draws_pred": int((pred_outcome == 1).sum()),
+        "n_draws_actual": int((true_outcome == 1).sum()),
+    }
+
+
+def make_tabicl(ckpt: Path | None = None):
+    """Create a TabICLClassifier with standard params."""
+    from huggingface_hub import hf_hub_download
+    from tabicl import TabICLClassifier
+    if ckpt is None:
+        ckpt = Path(hf_hub_download(
+            repo_id="jingang/TabICL",
+            filename="tabicl-classifier-v2-20260212.ckpt",
+        ))
+    return TabICLClassifier(
+        model_path=ckpt, norm_methods=None,
+        feat_shuffle_method="latin", class_shuffle_method="shift",
+        outlier_threshold=4, support_many_classes=True, batch_size=8,
+        kv_cache=False, allow_auto_download=False,
+        checkpoint_version=ckpt.name,
+        use_amp="auto", use_fa3="auto", offload_mode="auto",
+        disk_offload_dir=None,
+    )
 
 
 COMMANDS: dict[str, Any] = {name.replace("_", "-"): name for name in ENDPOINTS}
@@ -703,7 +732,3 @@ def main(argv: Sequence[str] | None = None) -> int:
         kwargs = {k: avail[k] for k in sig.parameters if k in avail}
         name(**kwargs)
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
