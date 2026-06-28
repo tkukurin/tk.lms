@@ -289,28 +289,26 @@ class TmClient:
     get_competition_table = partialmethod(call, "get_competition_table")
 
 
-def ratio(numerator: int | float, denominator: int | float) -> float | None:
-    return numerator / denominator if denominator else None
+def _ratio(n, d): return n / d if d else None
 
+def _club_id(player):
+    a = player.get("clubAssignments", [])
+    c = next((x for x in a if x.get("type") == "current"), None)
+    return str(c["clubId"]) if c else None
 
-def get_current_club_id(player: dict[str, Any]) -> str | None:
-    assignments = player.get("clubAssignments", [])
-    current = next((a for a in assignments if a.get("type") == "current"), None)
-    return str(current["clubId"]) if current else None
+def _mv(player):
+    return (player.get("marketValueDetails") or {}).get(
+        "current", {}).get("value") or 0
 
-
-def get_market_value(player: dict[str, Any]) -> int:
-    return (player.get("marketValueDetails") or {}).get("current", {}).get("value") or 0
-
-
-def get_value_at(history: dict[str, Any], cutoff: str) -> dict[str, Any] | None:
-    rows = history.get("history", [])
-    rows = [row for row in rows if row["marketValue"]["determined"] <= cutoff]
-    return max(rows, key=lambda row: row["marketValue"]["determined"], default=None)
+def _mv_at(history, cutoff):
+    rows = [r for r in history.get("history", [])
+        if r["marketValue"]["determined"] <= cutoff]
+    return max(rows, key=lambda r: r["marketValue"]["determined"],
+        default=None)
 
 
 def get_player_snapshot(profile: dict[str, Any], history: dict[str, Any], cutoff: str) -> dict[str, Any]:
-    row = get_value_at(history, cutoff)
+    row = _mv_at(history, cutoff)
     value = row["marketValue"]["value"] if row else 0
     age = row["age"] if row else profile.get("lifeDates", {}).get("age")
     club_id = str(row["clubId"]) if row else None
@@ -396,10 +394,10 @@ def get_roster_features(
     zero_count = missing_count = 0
 
     for player in roster:
-        value = get_market_value(player)
+        value = _mv(player)
         age = player.get("lifeDates", {}).get("age") or 0
         group = player.get("attributes", {}).get("positionGroup") or "UNKNOWN"
-        current_id = get_current_club_id(player)
+        current_id = _club_id(player)
         has_club, domestic, uefa = get_club_flags(current_id, country_id, current_clubs, country_confed)
 
         values.append(value)
@@ -518,7 +516,7 @@ def fetch_comp_year(
     }
     (out / "player_snapshots.json").write_text(json.dumps(snapshots, ensure_ascii=False, indent=2))
 
-    snap_club_ids = sorted({cid for p in snapshots.values() if (cid := get_current_club_id(p))}, key=int)
+    snap_club_ids = sorted({cid for p in snapshots.values() if (cid := _club_id(p))}, key=int)
     current_clubs = get_batched_rows(snap_club_ids, client.get_clubs_info)
     (out / "clubs_at_value.json").write_text(json.dumps(current_clubs, ensure_ascii=False, indent=2))
 
@@ -592,22 +590,20 @@ def _get_importance(t: str) -> int:
 
 def load_tm_features() -> dict[str, dict[int, list[float]]]:
     db: dict[str, dict[int, list[float]]] = {}
-    for comp_dir in TM_ROOT.iterdir():
-        if not comp_dir.is_dir() or comp_dir.name.startswith("_"):
-            continue
-        for year_dir in comp_dir.iterdir():
-            if not year_dir.is_dir():
-                continue
-            tf_path = year_dir / "team_features.json"
-            if not tf_path.exists():
-                continue
-            year_val = int(year_dir.name)
-            teams = json.loads(tf_path.read_text())
-            for _cid, feats in teams.items():
-                name_pt = feats.get("name", "")
-                name_en = NAME_MAP.get(name_pt, name_pt)
-                vec = [feats.get(c, 0) or 0 for c in ROSTER_COLS]
-                db.setdefault(name_en, {})[year_val] = vec
+    paths = [
+        (int(yd.name), tf)
+        for cd in TM_ROOT.iterdir()
+        if cd.is_dir() and not cd.name.startswith("_")
+        for yd in cd.iterdir()
+        if yd.is_dir() and (tf := yd / "team_features.json").exists()
+    ]
+    for year_val, tf_path in paths:
+        teams = json.loads(tf_path.read_text())
+        for _cid, feats in teams.items():
+            name_en = NAME_MAP.get(feats.get("name", ""),
+                feats.get("name", ""))
+            vec = [feats.get(c, 0) or 0 for c in ROSTER_COLS]
+            db.setdefault(name_en, {})[year_val] = vec
     return db
 
 
@@ -622,11 +618,7 @@ def get_team_vec(db: dict[str, dict[int, list[float]]], team: str, year: int) ->
     return team_db[max(candidates)]
 
 
-def load_match_dataset(tm_db: dict[str, dict[int, list[float]]] | None = None) -> pd.DataFrame:
-    """Load international matches enriched with TM features for both teams."""
-    if tm_db is None:
-        tm_db = load_tm_features()
-
+def load_match_dataset(tm_db: dict[str, dict[int, list[float]]]) -> pd.DataFrame:
     df = pd.read_csv(MATCHES_CSV)
     df = df[df["date"] >= "2006-01-01"].copy()
     df["year"] = pd.to_datetime(df["date"]).dt.year
@@ -684,15 +676,13 @@ def compute_metrics(
     }
 
 
-def make_tabicl(ckpt: Path | None = None):
-    """Create a TabICLClassifier with standard params."""
+def make_tabicl():
     from huggingface_hub import hf_hub_download
     from tabicl import TabICLClassifier
-    if ckpt is None:
-        ckpt = Path(hf_hub_download(
-            repo_id="jingang/TabICL",
-            filename="tabicl-classifier-v2-20260212.ckpt",
-        ))
+    ckpt = Path(hf_hub_download(
+        repo_id="jingang/TabICL",
+        filename="tabicl-classifier-v2-20260212.ckpt",
+    ))
     return TabICLClassifier(
         model_path=ckpt, norm_methods=None,
         feat_shuffle_method="latin", class_shuffle_method="shift",
