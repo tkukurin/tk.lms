@@ -425,27 +425,26 @@ def get_roster_features(
         "uefaClubValueShare": ratio(uefa_value, total),
     }
 
-    captain_feats = _get_captain_features(roster, squad)
+    captain_ids = {p["playerId"] for p in squad.get("squad", [])
+        if p.get("isCaptain")}
+    players_by_id = {p["id"]: p for p in roster}
+    cap = next((players_by_id.get(pid) for pid in captain_ids), None)
+    captain_feats = (
+        {"captainMarketValueEur": None, "captainAge": None,
+         "captainPosition": None} if not cap else {
+            "captainMarketValueEur": (cap.get("marketValueDetails") or
+                {}).get("current", {}).get("value"),
+            "captainAge": cap.get("lifeDates", {}).get("age"),
+            "captainPosition": cap.get("attributes", {}).get(
+                "positionGroup"),
+        }
+    )
     return get_value_features(values, ages, age_value, position_values) | {
         "squadCount": len(roster),
         "currentClubDiversity": len(current_ids - {""}),
         "squadMissingValueCount": missing_count,
         "squadZeroValueCount": zero_count,
     } | roster_share_feats | captain_feats
-
-
-def _get_captain_features(roster: Sequence[dict[str, Any]], squad: dict[str, Any]) -> dict[str, Any]:
-    captain_ids = {p["playerId"] for p in squad.get("squad", []) if p.get("isCaptain")}
-    players_by_id = {player["id"]: player for player in roster}
-    captain = next((players_by_id.get(pid) for pid in captain_ids), None)
-    if not captain:
-        return {"captainMarketValueEur": None, "captainAge": None, "captainPosition": None}
-    captain_value = (captain.get("marketValueDetails") or {}).get("current", {}).get("value")
-    return {
-        "captainMarketValueEur": captain_value,
-        "captainAge": captain.get("lifeDates", {}).get("age"),
-        "captainPosition": captain.get("attributes", {}).get("positionGroup"),
-    }
 
 
 def get_batched_rows(ids: Sequence[str], fetcher: Callable[..., Any]) -> dict[str, Any]:
@@ -581,11 +580,7 @@ def analyze(root: Path = TM_ROOT / "fiwc") -> None:
         print(f"  Avg podium in top-8: {sum(r['top4inTop8value'] for r in rows) / len(rows):.1f}/4")
 
 
-def _get_importance(t: str) -> int:
-    for key, val in TOURNAMENT_IMPORTANCE.items():
-        if key.lower() in t.lower():
-            return val
-    return 2
+
 
 
 def load_tm_features() -> dict[str, dict[int, list[float]]]:
@@ -621,7 +616,9 @@ def load_match_dataset(tm_db: dict[str, dict[int, list[float]]]) -> pd.DataFrame
     df = pd.read_csv(MATCHES_CSV)
     df = df[df["date"] >= "2006-01-01"].copy()
     df["year"] = pd.to_datetime(df["date"]).dt.year
-    df["importance"] = df["tournament"].apply(_get_importance)
+    df["importance"] = df["tournament"].apply(lambda t: next(
+        (v for k, v in TOURNAMENT_IMPORTANCE.items()
+         if k.lower() in t.lower()), 2))
     df["neutral"] = df["neutral"].astype(int)
 
     has_score = df["home_score"].notna()
