@@ -1,32 +1,67 @@
 """Query Transfermarkt's JSON API from notebooks or uv.
 
 Examples:
-  uv run --no-sync python nbs/26/2606_tmapi_client.py \
-    search-transfermarkt "world cup"
-  uv run --no-sync python nbs/26/2606_tmapi_client.py get-competition-info FIWC
+  uv run python nbs/26/2606_tmapi_client.py search-transfermarkt "world cup"
+  uv run python nbs/26/2606_tmapi_client.py get-competition-info FIWC
+
+See 538's [pele] for infos on chosen features.
+
+Apparently coding agent's favorite way to run:
+    import importlib.util, json, sys, time
+    spec=importlib.util.spec_from_file_location('tmc','nbs/26/2606_tmapi_client.py')
+    mod=importlib.util.module_from_spec(spec); sys.modules[spec.name]=mod; spec.loader.exec_module(mod)
+    client=mod.TmClient(timeout=20)
+    rows=[]
+    t0=time.time()
+    for year in mod.WORLD_CUP_YEARS:
+        y0=time.time()
+        row=mod.fetch_fiwc_year(client, year)
+        row['seconds']=round(time.time()-y0,1)
+        rows.append(row)
+        print(json.dumps(row, ensure_ascii=False), flush=True)
+    print(json.dumps({'seconds': round(time.time()-t0,1), 'years': rows}, ensure_ascii=False, indent=2))
+
+
+[wc26silver]: : https://www.natesilver.net/p/world-cup-2026-odds-predictions
+[pele]: https://www.natesilver.net/p/pele-methodology
+[538meth]: https://www.natesilver.net/p/pele-international-football-rankings-soccer-ratings-projections
 """
 # %% Imports
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from functools import partialmethod
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+
+from tk import datadir
 
 CacheItem = tuple[float, Any]
 
 BASE_URL = "https://tmapi-alpha.transfermarkt.technology/"
 DEFAULT_TIMEOUT = 5.0
 DEFAULT_TTL = 300.0
+TMAPI_BATCH_SIZE = 100
 DEFAULT_HEADERS = {
     "Accept": "application/json",
     "Accept-Language": "pt-BR",
     "User-Agent": "Mozilla/5.0",
+}
+WORLD_CUP_YEARS = (2006, 2010, 2014, 2018, 2022, 2026)
+WORLD_CUP_START_DATES = {
+    2006: "2006-06-09",
+    2010: "2010-06-11",
+    2014: "2014-06-12",
+    2018: "2018-06-14",
+    2022: "2022-11-20",
+    2026: "2026-06-11",
 }
 
 # %% Endpoint specs
@@ -121,6 +156,7 @@ ENDPOINTS.update(
 )
 
 COMMANDS = {name.replace("_", "-"): name for name in ENDPOINTS}
+COMMANDS |= {"pele": fetch_fiwc_year}
 
 # %% Endpoint construction
 def encode_query(items: Iterable[tuple[str, object]]) -> str:
@@ -240,8 +276,453 @@ class TmClient:
     get_coaches_info = partialmethod(call, "get_coaches_info")
     get_stadium_info = partialmethod(call, "get_stadium_info")
 
-# %%
 
+# %% World Cup player snapshot helpers
+def ratio(numerator: int | float, denominator: int | float) -> float | None:
+    return numerator / denominator if denominator else None
+
+
+def get_current_club_id(player: dict[str, Any]) -> str | None:
+    for assignment in player.get("clubAssignments", []):
+        if assignment.get("type") == "current":
+            return str(assignment.get("clubId"))
+    return None
+
+
+def get_market_value(player: dict[str, Any]) -> int:
+    current = player.get("marketValueDetails", {}).get("current", {})
+    return current.get("value") or 0
+
+
+def get_value_at(history: dict[str, Any], cutoff: str) -> dict[str, Any] | None:
+    rows = history.get("history", [])
+    rows = [row for row in rows if row["marketValue"]["determined"] <= cutoff]
+    return max(
+        rows,
+        key=lambda row: row["marketValue"]["determined"],
+        default=None,
+    )
+
+
+def get_player_snapshot(
+    profile: dict[str, Any],
+    history: dict[str, Any],
+    cutoff: str,
+) -> dict[str, Any]:
+    row = get_value_at(history, cutoff)
+    value = row["marketValue"]["value"] if row else 0
+    age = row["age"] if row else profile.get("lifeDates", {}).get("age")
+    club_id = str(row["clubId"]) if row else None
+    determined = None if not row else row["marketValue"]["determined"]
+    return {
+        "id": profile["id"],
+        "name": profile.get("name"),
+        "displayName": profile.get("displayName"),
+        "lifeDates": {"age": age},
+        "attributes": profile.get("attributes", {}),
+        "marketValueDetails": {
+            "current": {
+                "value": value,
+                "determined": determined,
+            },
+        },
+        "clubAssignments": (
+            [] if not club_id else [{"type": "current", "clubId": club_id}]
+        ),
+        "missingMarketValueAtCutoff": row is None,
+    }
+
+
+# %% World Cup roster value helpers
+def get_club_flags(
+    current_id: str | None,
+    country_id: int | None,
+    current_clubs: dict[str, dict[str, Any]],
+    country_confed: dict[int, int],
+) -> tuple[bool, bool, bool]:
+    if current_id is None:
+        return False, False, False
+    club = current_clubs.get(current_id, {})
+    club_country = club.get("baseDetails", {}).get("countryId")
+    is_domestic = club_country == country_id
+    is_uefa = country_confed.get(club_country) == 6
+    return True, is_domestic, is_uefa
+
+
+def get_value_features(
+    values: Sequence[int],
+    ages: Sequence[int | float],
+    age_value: int | float,
+    position_values: dict[str, int],
+) -> dict[str, Any]:
+    values = sorted(values)
+    total = sum(values)
+    top11 = sum(values[-11:])
+    top23 = sum(values[-23:])
+    age_mean = ratio(sum(ages), len(ages)) if ages else None
+    age_std = None
+    if age_mean is not None:
+        age_var = sum((age - age_mean) ** 2 for age in ages)
+        age_std = math.sqrt(age_var / len(ages))
+    mid = position_values.get("MIDFIELDER", 0)
+    attack = position_values.get("FORWARD", 0) + 0.5 * mid
+    defense = position_values.get("DEFENDER", 0)
+    defense += position_values.get("GOALKEEPER", 0) + 0.5 * mid
+    return {
+        "marketValueEur": total,
+        "logMarketValue": math.log1p(total),
+        "top11MarketValueEur": top11,
+        "logTop11MarketValue": math.log1p(top11),
+        "top23MarketValueEur": top23,
+        "logTop23MarketValue": math.log1p(top23),
+        "benchValueEur": top23 - top11,
+        "benchShare": ratio(top23 - top11, top23),
+        "starConcentration": ratio(values[-1], total) if values else None,
+        "top3Share": ratio(sum(values[-3:]), total),
+        "top5Share": ratio(sum(values[-5:]), total),
+        "valueWeightedAge": ratio(age_value, total),
+        "ageMean": age_mean,
+        "ageStd": age_std,
+        "positionValueEur": dict(sorted(position_values.items())),
+        "attackValueEur": attack,
+        "defenseValueEur": defense,
+        "attackTilt": ratio(attack - defense, total),
+        "attackDefenseRatio": ratio(attack, defense),
+        "gkValueShare": ratio(position_values.get("GOALKEEPER", 0), total),
+        "defValueShare": ratio(position_values.get("DEFENDER", 0), total),
+        "midValueShare": ratio(mid, total),
+        "fwdValueShare": ratio(position_values.get("FORWARD", 0), total),
+    }
+
+
+# %% World Cup captain helpers
+def get_captain(
+    roster: Sequence[dict[str, Any]],
+    squad: dict[str, Any],
+) -> dict[str, Any] | None:
+    captain_ids = {p["playerId"] for p in squad["squad"] if p.get("isCaptain")}
+    players_by_id = {player["id"]: player for player in roster}
+    return next((players_by_id.get(pid) for pid in captain_ids), None)
+
+
+def get_captain_features(captain: dict[str, Any] | None) -> dict[str, Any]:
+    if not captain:
+        return {
+            "captainMarketValueEur": None,
+            "captainAge": None,
+            "captainPosition": None,
+        }
+    captain_value = captain.get("marketValueDetails", {})
+    captain_value = captain_value.get("current", {}).get("value")
+    return {
+        "captainMarketValueEur": captain_value,
+        "captainAge": captain.get("lifeDates", {}).get("age"),
+        "captainPosition": captain.get("attributes", {}).get("positionGroup"),
+    }
+
+
+# %% World Cup feature extraction
+def get_roster_features(
+    roster: Sequence[dict[str, Any]],
+    squad: dict[str, Any],
+    country_id: int | None,
+    current_clubs: dict[str, dict[str, Any]],
+    country_confed: dict[int, int],
+) -> dict[str, Any]:
+    values, ages, age_value = [], [], 0
+    position_values: dict[str, int] = {}
+    current_ids = set()
+    domestic_count = current_count = 0
+    domestic_value = uefa_value = u23_value = u25_value = over30_value = 0
+    zero_count = missing_count = 0
+
+    for player in roster:
+        value = get_market_value(player)
+        age = player.get("lifeDates", {}).get("age") or 0
+        group = player.get("attributes", {}).get("positionGroup") or "UNKNOWN"
+        current_id = get_current_club_id(player)
+        has_club, domestic, uefa = get_club_flags(
+            current_id,
+            country_id,
+            current_clubs,
+            country_confed,
+        )
+
+        values.append(value)
+        ages.append(age)
+        age_value += age * value
+        position_values[group] = position_values.get(group, 0) + value
+        current_ids.add(current_id or "")
+        current_count += int(has_club)
+        domestic_count += int(domestic)
+        domestic_value += value * int(domestic)
+        uefa_value += value * int(uefa)
+        missing_count += int(player.get("missingMarketValueAtCutoff", False))
+        zero_count += int(not value)
+        u23_value += value * int(age < 23)
+        u25_value += value * int(age < 25)
+        over30_value += value * int(age > 30)
+
+    total = sum(values)
+    roster_share_feats =  {
+        "u23ValueShare": ratio(u23_value, total),
+        "u25ValueShare": ratio(u25_value, total),
+        "over30ValueShare": ratio(over30_value, total),
+        "domesticClubShare": ratio(domestic_count, current_count),
+        "domesticValueShare": ratio(domestic_value, total),
+        "uefaClubValueShare": ratio(uefa_value, total),
+    }
+    return get_value_features(values, ages, age_value, position_values) | {
+        "squadCount": len(roster),
+        "currentClubDiversity": len(current_ids - {""}),
+        "squadMissingValueCount": missing_count,
+        "squadZeroValueCount": zero_count,
+    } | roster_share_feats | get_captain_features(get_captain(roster, squad))
+
+
+# %% World Cup retrieval helpers
+def get_table_clubs(
+    table: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[str], dict[str, dict[str, Any]]]:
+    rows = []
+    for group in table["tables"]:
+        rows.extend(group["clubs"])
+    club_ids = [row["clubId"] for row in rows]
+    club_rows = {row["clubId"]: row for row in rows}
+    return rows, club_ids, club_rows
+
+
+def get_batched_rows(
+    ids: Sequence[str],
+    get_page: Callable[[Sequence[str]], dict[str, Any]],
+    batch_size: int = TMAPI_BATCH_SIZE,
+) -> dict[str, Any]:
+    rows = {}
+    for start in range(0, len(ids), batch_size):
+        page_ids = ids[start : start + batch_size]
+        for row in get_page(page_ids)["data"]:
+            rows[row["id"]] = row
+    return rows
+
+
+def get_current_clubs(
+    client: TmClient,
+    players: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    club_ids = {
+        club_id
+        for player in players.values()
+        if (club_id := get_current_club_id(player))
+    }
+    club_ids = sorted(club_ids, key=int)
+    return get_batched_rows(club_ids, client.get_clubs_info)
+
+
+# %% World Cup feature fetch
+def featfetch(client: TmClient) -> dict[str, Any]:
+    attributes = client.attributes()["data"]
+    country_confed = {
+        country["id"]: country["confederationId"]
+        for country in attributes["countries"]
+    }
+    competition = client.get_competition_info("FIWC")["data"]
+    table = client.get_competition_table("FIWC")["data"]
+    _, club_ids, club_rows = get_table_clubs(table)
+    clubs = {
+        club_id: client.get_club_info(club_id)["data"]
+        for club_id in club_ids
+    }
+    squads = {
+        club_id: client.get_club_squad(club_id)["data"]
+        for club_id in club_ids
+    }
+    player_ids = sorted(
+        {pid for squad in squads.values() for pid in squad["playerIds"]},
+        key=int,
+    )
+    players = get_batched_rows(player_ids, client.get_players_info)
+    current_clubs = get_current_clubs(client, players)
+    teams = {}
+    for club_id, squad in squads.items():
+        roster = [players[player_id] for player_id in squad["playerIds"]]
+        country_id = clubs[club_id].get("baseDetails", {}).get("countryId")
+        teams[club_id] = get_roster_features(
+            roster,
+            squad,
+            country_id,
+            current_clubs,
+            country_confed,
+        ) | {"name": clubs[club_id].get("name"), "table": club_rows[club_id]}
+
+    data = {"competition": competition, "table": table, "teams": teams}
+    return data | {
+        "search": client.search_transfermarkt("world cup")["data"],
+        "clubs": clubs,
+        "squads": squads,
+        "players": players,
+        "currentClubs": current_clubs,
+    }
+
+
+# %%
+def write_json(path: Path, data: Any) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    return path
+
+
+# %% Raw yearly player history helpers
+def fetch_player_histories(
+    client: TmClient,
+    player_ids: Sequence[str],
+    cache_dir: Path,
+) -> dict[str, Any]:
+    histories = {}
+    for player_id in player_ids:
+        path = cache_dir / f"{player_id}.json"
+        if path.exists():
+            histories[player_id] = json.loads(path.read_text())
+            continue
+        data = client.get_player_market_value_history(player_id)["data"]
+        histories[player_id] = data
+        write_json(path, data)
+    return histories
+
+
+def get_snapshot_clubs(
+    client: TmClient,
+    snapshots: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    club_ids = sorted(
+        {
+            club_id
+            for player in snapshots.values()
+            if (club_id := get_current_club_id(player))
+        },
+        key=int,
+    )
+    return get_batched_rows(club_ids, client.get_clubs_info)
+
+
+def get_team_features(
+    clubs: dict[str, Any],
+    squads: dict[str, Any],
+    snapshots: dict[str, Any],
+    club_rows: dict[str, Any],
+    current_clubs: dict[str, Any],
+    country_confed: dict[int, int],
+) -> dict[str, Any]:
+    teams = {}
+    for club_id, squad in squads.items():
+        roster = [snapshots[player_id] for player_id in squad["playerIds"]]
+        country_id = clubs[club_id].get("baseDetails", {}).get("countryId")
+        teams[club_id] = get_roster_features(
+            roster,
+            squad,
+            country_id,
+            current_clubs,
+            country_confed,
+        ) | {"name": clubs[club_id].get("name"), "table": club_rows[club_id]}
+    return teams
+
+
+def fetch_fiwc_squads(
+    client: TmClient,
+    club_ids: Sequence[str],
+    season: int,
+    out: Path,
+) -> dict[str, Any]:
+    squads = {}
+    for club_id in club_ids:
+        squad = client.fetch(f"club/{club_id}/squad?season={season}")["data"]
+        squads[club_id] = squad
+        write_json(out / "squads" / f"{club_id}.json", squad)
+    write_json(out / "squads.json", squads)
+    return squads
+
+
+def get_player_snapshots(
+    players: dict[str, Any],
+    histories: dict[str, Any],
+    player_ids: Sequence[str],
+    cutoff: str,
+) -> dict[str, Any]:
+    return {
+        player_id: get_player_snapshot(
+            players[player_id],
+            histories[player_id],
+            cutoff,
+        )
+        for player_id in player_ids
+    }
+
+
+# %%
+def fetch_fiwc_year(client: TmClient, year: int, root: Path = datadir / "transfermarkt" / "fiwc") -> dict[str, Any]:
+    """fetch supposed to be inspired by [pele] feats."""
+    season = year - 1
+    cutoff = WORLD_CUP_START_DATES[year]
+    out = root / str(year)
+    table = client.fetch(f"competition/FIWC/table?season={season}")["data"]
+    write_json(out / "table.json", table)
+    _, club_ids, club_rows = get_table_clubs(table)
+
+    clubs = get_batched_rows(club_ids, client.get_clubs_info)
+    write_json(out / "clubs.json", clubs)
+
+    squads = fetch_fiwc_squads(client, club_ids, season, out)
+    player_ids = sorted(
+        {pid for squad in squads.values() for pid in squad["playerIds"]},
+        key=int,
+    )
+    players = get_batched_rows(player_ids, client.get_players_info)
+    player_ids = sorted(players, key=int)
+    write_json(out / "player_profiles_current.json", players)
+
+    histories = fetch_player_histories(
+        client,
+        player_ids,
+        root / "_player_market_value_history",
+    )
+    snapshots = get_player_snapshots(players, histories, player_ids, cutoff)
+    write_json(out / "player_snapshots.json", snapshots)
+    current_clubs = get_snapshot_clubs(client, snapshots)
+    write_json(out / "clubs_at_value.json", current_clubs)
+    attributes = client.attributes()["data"]
+    country_confed = {
+        country["id"]: country["confederationId"]
+        for country in attributes["countries"]
+    }
+
+
+    teams = get_team_features(
+        clubs,
+        squads,
+        snapshots,
+        club_rows,
+        current_clubs,
+        country_confed,
+    )
+    write_json(out / "team_features.json", teams)
+
+    summary = {
+        "year": year,
+        "season": season,
+        "cutoff": cutoff,
+        "groups": len(table.get("tables", [])),
+        "teams": len(club_ids),
+        "squads": len(squads),
+        "players": len(players),
+        "missingMarketValues": sum(
+            player["missingMarketValueAtCutoff"]
+            for player in snapshots.values()
+        ),
+    }
+    write_json(out / "summary.json", summary)
+    return summary
+
+
+# %% CLI
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=sorted(COMMANDS))
@@ -251,24 +732,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--ttl", type=float, default=DEFAULT_TTL)
     parser.add_argument("--no-cache", action="store_true")
     args = parser.parse_args(argv)
-    name = COMMANDS[args.command]
-    spec = ENDPOINTS[name]
-    names = [*spec.path_args, *spec.required_query]
-    if spec.ids_query:
-        names.append("ids")
+    client = TmClient(timeout=args.timeout, ttl=args.ttl, use_cache=not args.no_cache)
 
-    params = dict(zip(names, args.values, strict=True))
-    if spec.ids_query:
-        params["ids"] = [part.strip() for part in args.values[-1].split(",")]
-    if "season" in spec.optional_query:
-        params["season"] = args.season
-    client = TmClient(
-        timeout=args.timeout,
-        ttl=args.ttl,
-        use_cache=not args.no_cache,
-    )
-    result = client.call(name, **params)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    name = COMMANDS[args.command]
+    if spec := ENDPOINTS.get(name):
+        names = [*spec.path_args, *spec.required_query]
+        if spec.ids_query: names.append("ids")
+        params = dict(zip(names, args.values, strict=True))
+        if spec.ids_query:
+            params["ids"] = [part.strip() for part in args.values[-1].split(",")]
+        if "season" in spec.optional_query:
+            params["season"] = args.season
+        result = client.call(name, **params)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        name(client, )
     return 0
 
 
