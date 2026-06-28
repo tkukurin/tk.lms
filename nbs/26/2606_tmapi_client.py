@@ -155,8 +155,7 @@ ENDPOINTS.update(
     }
 )
 
-COMMANDS = {name.replace("_", "-"): name for name in ENDPOINTS}
-COMMANDS |= {"pele": fetch_fiwc_year}
+
 
 # %% Endpoint construction
 def encode_query(items: Iterable[tuple[str, object]]) -> str:
@@ -591,7 +590,68 @@ def fetch_fiwc_year(client: TmClient, year: int, root: Path = datadir / "transfe
     return summary
 
 
+# %% Validation
+WC_FINAL_RANK = {
+    2006: ["Itália", "França", "Alemanha", "Portugal"],
+    2010: ["Espanha", "Holanda", "Alemanha", "Uruguai"],
+    2014: ["Alemanha", "Argentina", "Holanda", "Brasil"],
+    2018: ["França", "Croácia", "Bélgica", "Inglaterra"],
+    2022: ["Argentina", "França", "Croácia", "Marrocos"],
+}
+
+
+def analyze(root: Path = datadir / "transfermarkt" / "fiwc") -> None:
+    """Check if top11MarketValueEur correlates with WC finishing position.
+
+    Sanity check because we get >23 team members in total.
+    Seems PELE is anchored to 23 members for some features.
+    Potentially TODO.
+    May add other features here as well.
+
+    Summary across 5 tournaments:
+        Avg winner value rank: 2.8
+        Avg podium members in top-8 by value: 2.6/4
+    """
+    rows = []
+    for year in WORLD_CUP_YEARS:
+        if not (path := root / str(year) / "team_features.json").exists(): continue
+        if not (podium := WC_FINAL_RANK.get(year)): continue
+        teams = json.loads(path.read_text())
+        ranked = sorted(teams.values(), key=lambda t: -t["top11MarketValueEur"])
+        names = [t["name"] for t in ranked]
+        winner = podium[0]
+        winner_rank = names.index(winner) + 1 if winner in names else None
+        top4_in_top8 = sum(1 for p in podium if p in names[:8])
+        top4_in_top16 = sum(1 for p in podium if p in names[:16])
+        rows.append({
+            "year": year,
+            "teams": len(teams),
+            "winner": winner,
+            "winnerValueRank": winner_rank,
+            "top4inTop8value": top4_in_top8,
+            "top4inTop16value": top4_in_top16,
+            "top5byValue": names[:5],
+        })
+        print(f"\n=== {year} ===")
+        print(f"  Winner: {winner} (value rank #{winner_rank}/{len(teams)})")
+        print(f"  Podium in top-8 by value: {top4_in_top8}/4")
+        print(f"  Podium in top-16 by value: {top4_in_top16}/4")
+        print(f"  Top 5 by value: {names[:5]}")
+        print(f"  Actual podium:  {podium}")
+
+    if rows:
+        avg_winner_rank = sum(r["winnerValueRank"] for r in rows) / len(rows)
+        avg_top4_in8 = sum(r["top4inTop8value"] for r in rows) / len(rows)
+        print(f"\n--- Summary across {len(rows)} tournaments ---")
+        print(f"  Avg winner value rank: {avg_winner_rank:.1f}")
+        print(f"  Avg podium members in top-8 by value: {avg_top4_in8:.1f}/4")
+
+
 # %% CLI
+COMMANDS = {name.replace("_", "-"): name for name in ENDPOINTS}
+COMMANDS |= {"pele": fetch_fiwc_year, "analyze": analyze}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=sorted(COMMANDS))
