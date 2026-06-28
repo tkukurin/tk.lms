@@ -34,12 +34,12 @@ import inspect
 import json
 import math
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import partialmethod
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from tk import datadir
@@ -154,38 +154,6 @@ ENDPOINTS.update(
 )
 
 
-
-# %% Endpoint construction
-def encode_query(items: Iterable[tuple[str, object]]) -> str:
-    return "&".join(
-        f"{quote(key, safe='[]')}={quote(str(value), safe='')}"
-        for key, value in items
-    )
-
-
-def get_endpoint(spec: Endpoint, params: dict[str, Any]) -> str:
-    path_args = {
-        key: quote(str(params[key]), safe="")
-        for key in spec.path_args
-    }
-    endpoint = spec.path.format(**path_args)
-    query_items: list[tuple[str, object]] = []
-
-    if spec.ids_query:
-        query_items.extend(("ids[]", value) for value in params["ids"])
-
-    for key in spec.required_query:
-        query_items.append((key, params[key]))
-
-    for key in spec.optional_query:
-        if (value := params.get(key)) is not None:
-            query_items.append((key, value))
-
-    if not query_items:
-        return endpoint
-    return f"{endpoint}?{encode_query(query_items)}"
-
-
 # %% Client core
 @dataclass
 class TmClient:
@@ -216,12 +184,7 @@ class TmClient:
         return data
 
     def call(self, name: str, *values: Any, **params: Any) -> Any:
-        if name not in ENDPOINTS:
-            choices = ", ".join(sorted(ENDPOINTS))
-            raise KeyError(
-                f"Unknown endpoint {name!r}; choose one of: {choices}"
-            )
-
+        assert name in ENDPOINTS, f"{name=}\n{sorted(ENDPOINTS)=}"
         spec = ENDPOINTS[name]
         if values:
             names = [
@@ -232,7 +195,16 @@ class TmClient:
             ]
             params = dict(zip(names, values, strict=True)) | params
 
-        return self.fetch(get_endpoint(spec, params))
+        path_args = {k: quote(str(params[k]), safe="") for k in spec.path_args}
+        endpoint = spec.path.format(**path_args)
+        query_items: list[tuple[str, Any]] = []
+        if spec.ids_query:
+            query_items.extend(("ids[]", value) for value in params["ids"])
+        for key in (*spec.required_query, *spec.optional_query):
+            if (value := params.get(key)) is not None:
+                query_items.append((key, value))
+        if query_items: endpoint = f"{endpoint}?{urlencode(query_items, doseq=True)}"
+        return self.fetch(endpoint)
 
     attributes = partialmethod(call, "attributes")
     tmsearch = partialmethod(call, "tmsearch")
@@ -392,8 +364,7 @@ def get_value_features(
     }
 
 
-# %% World Cup captain helpers
-# %% World Cup feature extraction
+# %%
 def get_roster_features(
     roster: Sequence[dict[str, Any]],
     squad: dict[str, Any],
@@ -511,15 +482,57 @@ def fetch_fiwc_squads(
 
 
 # %%
-def fetch_fiwc_year(client: TmClient, year: int, root: Path = datadir / "transfermarkt" / "fiwc") -> dict[str, Any]:
-    """fetch supposed to be inspired by [pele] feats."""
+COMPETITIONS = {
+    "FIWC": {  # FIFA World Cup
+        2006: "2006-06-09", 2010: "2010-06-11", 2014: "2014-06-12",
+        2018: "2018-06-14", 2022: "2022-11-20", 2026: "2026-06-11",
+    },
+    "EURO": {  # UEFA Euro
+        2008: "2008-06-07", 2012: "2012-06-08", 2016: "2016-06-10",
+        2021: "2021-06-11", 2024: "2024-06-14",
+    },
+    "COPA": {  # Copa América
+        2007: "2007-06-26", 2011: "2011-07-01", 2015: "2015-06-11",
+        2016: "2016-06-03", 2019: "2019-06-14", 2021: "2021-06-13",
+        2024: "2024-06-20",
+    },
+    "AFCN": {  # Africa Cup of Nations
+        2008: "2008-01-20", 2010: "2010-01-10", 2012: "2012-01-21",
+        2013: "2013-01-19", 2015: "2015-01-17", 2017: "2017-01-14",
+        2019: "2019-06-21", 2022: "2022-01-09", 2024: "2024-01-13",
+    },
+    "AFAC": {  # AFC Asian Cup
+        2007: "2007-07-07", 2011: "2011-01-07", 2015: "2015-01-09",
+        2019: "2019-01-05", 2023: "2023-01-12",
+    },
+    "GOCU": {  # CONCACAF Gold Cup
+        2007: "2007-06-06", 2009: "2009-07-03", 2011: "2011-06-05",
+        2013: "2013-07-07", 2015: "2015-07-07", 2017: "2017-07-07",
+        2019: "2019-06-15", 2021: "2021-07-10", 2023: "2023-06-24",
+    },
+}
+
+
+def fetch_comp_year(
+    client: TmClient,
+    comp_id: str,
+    year: int,
+    cutoff: str,
+    root: Path = datadir / "transfermarkt",
+) -> dict[str, Any]:
+    """Fetch roster features for any international competition/year."""
     season = year - 1
-    cutoff = WORLD_CUP_START_DATES[year]
-    out = root / str(year)
+    out = root / comp_id.lower() / str(year)
     out.mkdir(parents=True, exist_ok=True)
-    table = client.fetch(f"competition/FIWC/table?season={season}")["data"]
+
+    # If already done, skip
+    if (out / "team_features.json").exists():
+        import json as _json
+        return _json.loads((out / "summary.json").read_text())
+
+    table = client.fetch(f"competition/{comp_id}/table?season={season}")["data"]
     (out / "table.json").write_text(json.dumps(table, ensure_ascii=False, indent=2))
-    rows = [club for group in table["tables"] for club in group["clubs"]]
+    rows = [club for group in table.get("tables", []) for club in group.get("clubs", [])]
     club_ids = [row["clubId"] for row in rows]
     club_rows = {row["clubId"]: row for row in rows}
 
@@ -540,17 +553,15 @@ def fetch_fiwc_year(client: TmClient, year: int, root: Path = datadir / "transfe
         player_ids,
         root / "_player_market_value_history",
     )
-    snapshots =  {
-        player_id: get_player_snapshot(
-            players[player_id],
-            histories[player_id],
-            cutoff,
-        )
+    snapshots = {
+        player_id: get_player_snapshot(players[player_id], histories[player_id], cutoff)
         for player_id in player_ids
     }
     (out / "player_snapshots.json").write_text(json.dumps(snapshots, ensure_ascii=False, indent=2))
-    club_ids = sorted({ club_id for player in snapshots.values() if (club_id := get_current_club_id(player)) }, key=int)
-    current_clubs = get_batched_rows(club_ids, client.get_clubs_info)
+    snap_club_ids = sorted(
+        {cid for p in snapshots.values() if (cid := get_current_club_id(p))}, key=int,
+    )
+    current_clubs = get_batched_rows(snap_club_ids, client.get_clubs_info)
     (out / "clubs_at_value.json").write_text(json.dumps(current_clubs, ensure_ascii=False, indent=2))
     attributes = client.attributes()["data"]
     country_confed = {
@@ -563,29 +574,38 @@ def fetch_fiwc_year(client: TmClient, year: int, root: Path = datadir / "transfe
         roster = [snapshots[player_id] for player_id in squad["playerIds"]]
         country_id = clubs[club_id].get("baseDetails", {}).get("countryId")
         teams[club_id] = get_roster_features(
-            roster,
-            squad,
-            country_id,
-            current_clubs,
-            country_confed,
-        ) | {"name": clubs[club_id].get("name"), "table": club_rows[club_id]}
+            roster, squad, country_id, current_clubs, country_confed,
+        ) | {"name": clubs[club_id].get("name"), "table": club_rows.get(club_id)}
     (out / "team_features.json").write_text(json.dumps(teams, ensure_ascii=False, indent=2))
 
     summary = {
-        "year": year,
-        "season": season,
-        "cutoff": cutoff,
-        "groups": len(table.get("tables", [])),
-        "teams": len(club_ids),
-        "squads": len(squads),
-        "players": len(players),
+        "comp": comp_id, "year": year, "season": season, "cutoff": cutoff,
+        "teams": len(teams), "players": len(players),
         "missingMarketValues": sum(
-            player["missingMarketValueAtCutoff"]
-            for player in snapshots.values()
+            p["missingMarketValueAtCutoff"] for p in snapshots.values()
         ),
     }
     (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary
+
+
+def fetch_fiwc_year(client: TmClient, year: int, root: Path = datadir / "transfermarkt" / "fiwc") -> dict[str, Any]:
+    """fetch supposed to be inspired by [pele] feats."""
+    cutoff = WORLD_CUP_START_DATES[year]
+    return fetch_comp_year(client, "FIWC", year, cutoff, root=root.parent)
+
+
+def fetch_all(client: TmClient) -> None:
+    """Fetch TM features for all competitions and years."""
+    for comp_id, years in COMPETITIONS.items():
+        for year, cutoff in years.items():
+            t0 = time.time()
+            try:
+                summary = fetch_comp_year(client, comp_id, year, cutoff)
+                summary["seconds"] = round(time.time() - t0, 1)
+                print(json.dumps(summary, ensure_ascii=False), flush=True)
+            except Exception as e:
+                print(f"ERROR {comp_id}/{year}: {e}", flush=True)
 
 
 # %% Validation
@@ -647,7 +667,7 @@ def analyze(root: Path = datadir / "transfermarkt" / "fiwc") -> None:
 
 # %% CLI
 COMMANDS = {name.replace("_", "-"): name for name in ENDPOINTS}
-COMMANDS |= {"pele": fetch_fiwc_year, "analyze": analyze}
+COMMANDS |= {"pele": fetch_fiwc_year, "analyze": analyze, "fetch-all": fetch_all}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
