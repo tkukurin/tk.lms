@@ -539,50 +539,6 @@ def fetch_comp_year(
     (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary
 
-
-def fetch_all(client: TmClient) -> None:
-    for comp_id, years in COMPETITIONS.items():
-        for year, cutoff in years.items():
-            t0 = time.time()
-            try:
-                summary = fetch_comp_year(client, comp_id, year, cutoff)
-                summary["seconds"] = round(time.time() - t0, 1)
-                print(json.dumps(summary, ensure_ascii=False), flush=True)
-            except Exception as e:
-                print(f"ERROR {comp_id}/{year}: {e}", flush=True)
-
-
-def analyze(root: Path = TM_ROOT / "fiwc") -> None:
-    """Check if top11MarketValueEur correlates with WC finishing position."""
-    rows = []
-    for year in WORLD_CUP_YEARS:
-        if not (path := root / str(year) / "team_features.json").exists():
-            continue
-        if not (podium := WC_FINAL_RANK.get(year)):
-            continue
-        teams = json.loads(path.read_text())
-        ranked = sorted(teams.values(), key=lambda t: -t["top11MarketValueEur"])
-        names = [t["name"] for t in ranked]
-        winner = podium[0]
-        winner_rank = names.index(winner) + 1 if winner in names else None
-        top4_in_top8 = sum(1 for p in podium if p in names[:8])
-        top4_in_top16 = sum(1 for p in podium if p in names[:16])
-        rows.append({"year": year, "winnerValueRank": winner_rank, "top4inTop8value": top4_in_top8})
-        print(f"\n{year}")
-        print(f"  Winner: {winner} (value rank #{winner_rank}/{len(teams)})")
-        print(f"  Podium in top-8 by value: {top4_in_top8}/4")
-        print(f"  Podium in top-16 by value: {top4_in_top16}/4")
-        print(f"  Top 5 by value: {names[:5]}")
-        print(f"  Actual podium:  {podium}")
-    if rows:
-        print(f"\nSummary across {len(rows)} tournaments")
-        print(f"  Avg winner value rank: {sum(r['winnerValueRank'] for r in rows) / len(rows):.1f}")
-        print(f"  Avg podium in top-8: {sum(r['top4inTop8value'] for r in rows) / len(rows):.1f}/4")
-
-
-
-
-
 def load_tm_features() -> dict[str, dict[int, list[float]]]:
     db: dict[str, dict[int, list[float]]] = {}
     for cd in TM_ROOT.iterdir():
@@ -671,24 +627,16 @@ def compute_metrics(
         "n_draws_actual": int((true_outcome == 1).sum()),
     }
 
-
-
-
-
-COMMANDS: dict[str, Any] = {name.replace("_", "-"): name for name in ENDPOINTS}
-COMMANDS |= {"analyze": analyze, "fetch-all": fetch_all}
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=sorted(COMMANDS))
+    parser.add_argument("command", choices=sorted(ENDPOINTS))
     parser.add_argument("values", nargs="*")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
     parser.add_argument("--ttl", type=float, default=DEFAULT_TTL)
     parser.add_argument("--no-cache", action="store_true")
     args = parser.parse_args(argv)
     client = TmClient(timeout=args.timeout, ttl=args.ttl, use_cache=not args.no_cache)
-    if spec := ENDPOINTS.get(name := COMMANDS[args.command]):
+    if spec := ENDPOINTS.get(args.command):
         names = [*spec.path_args, *spec.required_query]
         if spec.ids_query:
             names.append("ids")
@@ -697,9 +645,40 @@ def main(argv: Sequence[str] | None = None) -> int:
             params["ids"] = [part.strip() for part in args.values[-1].split(",")]
         result = client.call(name, **params)  # type: ignore[arg-type]
         print(json.dumps(result, ensure_ascii=False, indent=2))
-    else:
-        sig = inspect.signature(name)  # type: ignore[arg-type]
-        avail = {"client": client, **{v: int(v) for v in args.values}}
-        kwargs = {k: avail[k] for k in sig.parameters if k in avail}
-        name(**kwargs)
+    elif args.command == "fetch_all":
+        for comp_id, years in COMPETITIONS.items():
+            for year, cutoff in years.items():
+                t0 = time.time()
+                try:
+                    summary = fetch_comp_year(client, comp_id, year, cutoff)
+                    summary["seconds"] = round(time.time() - t0, 1)
+                    print(json.dumps(summary, ensure_ascii=False), flush=True)
+                except Exception as e:
+                    print(f"ERROR {comp_id}/{year}: {e}", flush=True)
+    elif args.comamnd == "analyze":
+        rows = []
+        for year in WORLD_CUP_YEARS:
+            if not (path := TM_ROOT / "fiwc" / str(year) / "team_features.json").exists():
+                continue
+            if not (podium := WC_FINAL_RANK.get(year)):
+                continue
+            teams = json.loads(path.read_text())
+            ranked = sorted(teams.values(), key=lambda t: -t["top11MarketValueEur"])
+            names = [t["name"] for t in ranked]
+            winner = podium[0]
+            winner_rank = names.index(winner) + 1 if winner in names else None
+            top4_in_top8 = sum(1 for p in podium if p in names[:8])
+            top4_in_top16 = sum(1 for p in podium if p in names[:16])
+            rows.append({"year": year, "winnerValueRank": winner_rank, "top4inTop8value": top4_in_top8})
+            print(f"\n{year}")
+            print(f"  Winner: {winner} (value rank #{winner_rank}/{len(teams)})")
+            print(f"  Podium in top-8 by value: {top4_in_top8}/4")
+            print(f"  Podium in top-16 by value: {top4_in_top16}/4")
+            print(f"  Top 5 by value: {names[:5]}")
+            print(f"  Actual podium:  {podium}")
+        if rows:
+            print(f"\nSummary across {len(rows)} tournaments")
+            print(f"  Avg winner value rank: {sum(r['winnerValueRank'] for r in rows) / len(rows):.1f}")
+            print(f"  Avg podium in top-8: {sum(r['top4inTop8value'] for r in rows) / len(rows):.1f}/4")
+
     return 0
