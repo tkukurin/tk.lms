@@ -3,15 +3,18 @@
 Q1: Does predicting exact scores (two classifiers: home_goals, away_goals)
     then deriving outcome beat direct 3-way classification?
 Q2: Does data augmentation help?
+Q3: Does fine-tuning on synthetic data help?
 
 (NB tentative results; need to double check LLM implementation of my spec.)
 
 A1: YES. Multi-output clf best on test (66.7% vs 65.3% direct) AND solves
     draws (9/20 vs 0/20). Exact score ~14%. Regression terrible (35%).
-A2: Mirror augmentation (swap home/away, lossless) gives +1.4pp → 68.1%.
+A2: Mirror augmentation (swap home/away, lossless) gives +1.4pp -> 68.1%.
     All other synthetic approaches (Poisson, NegBin, RF, TabICL self-play,
     inverse feature gen) HURT because they dilute signal.
-    TabICL is deterministic — 0 variance across seeds.
+    TabICL is deterministic -- 0 variance across seeds.
+A3: TBD. Hypothesis: two-stage training (synth -> real fine-tune) or
+    weighted mixtures preserve signal better than naive concatenation.
 
 Final results (WC 2026 test, 72 matches):
   Q1a direct outcome:    56.2%/65.3%  draws=0/20
@@ -19,6 +22,10 @@ Final results (WC 2026 test, 72 matches):
   Q1b + mirror:          53.1%/68.1%  draws=9/20 (best)
   Q1c GBR regression:    39.1%/34.7%  terrible
   Q2  diverse synth 31k: 48.4%/52.8%  hurts (-14pp)
+  Q3a synth->GBR finetune:   TBD
+  Q3b weighted mix (5:1):    TBD
+  Q3c synth-only baseline:   TBD
+  Q3d mirror+inverse synth:  TBD
 """
 # pyright: reportArgumentType=false, reportReturnType=false
 # %% Setup
@@ -30,13 +37,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from huggingface_hub import hf_hub_download
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
 from sklearn.metrics import accuracy_score
 from tabicl import TabICLClassifier
 
 from tk import datadir
 from tk.nbs.footie import (
-    FEAT_COLS, VALID_CUT, TEST_CUT,
+    FEAT_COLS, HOME_COLS, VALID_CUT, TEST_CUT,
     compute_metrics, load_match_dataset, load_tm_features,
 )
 
@@ -156,6 +163,27 @@ pa_t = np.clip(np.round(gbr_a.predict(X_te)), 0, 9).astype(int)
 print(f"  ({_time.time()-t0:.0f}s)")
 _eval("Q1c_regression", ph_v, pa_v, ph_t, pa_t)
 
+# %% Q1b + mirror: lossless augmentation (swap home/away)
+print("\nQ1b+mirror: Multi-output + mirror augmentation")
+t0 = _time.time()
+nc = len(HOME_COLS)
+X_mirror = X_tr.copy()
+X_mirror[:, 3:3+nc] = X_tr[:, 3+nc:]
+X_mirror[:, 3+nc:] = X_tr[:, 3:3+nc]
+X_aug_mirror = np.vstack([X_tr, X_mirror]).astype(np.float32)
+y_h_mirror = np.concatenate([y_home_tr, y_away_tr])
+y_a_mirror = np.concatenate([y_away_tr, y_home_tr])
+print(f"  Real={X_tr.shape[0]} + Mirror={X_mirror.shape[0]} = {X_aug_mirror.shape[0]}")
+
+tab_hm = _tabicl()
+tab_hm.fit(X_aug_mirror, y_h_mirror)
+tab_am = _tabicl()
+tab_am.fit(X_aug_mirror, y_a_mirror)
+ph_v, pa_v = tab_hm.predict(X_va), tab_am.predict(X_va)
+ph_t, pa_t = tab_hm.predict(X_te), tab_am.predict(X_te)
+print(f"  ({_time.time()-t0:.0f}s)")
+_eval("Q1b_mirror", ph_v, pa_v, ph_t, pa_t)
+
 # %% Q2: Diverse counterfactual augmentation
 print("\nQ2: Real + diverse counterfactuals")
 synth_path = datadir / "out" / "2606_synth_tournaments" / "matches.parquet"
@@ -184,6 +212,140 @@ else:
     pa_t = tab_a2.predict(X_te)
     print(f"  ({_time.time()-t0:.0f}s)")
     _eval("Q2_diverse_synth", ph_v, pa_v, ph_t, pa_t)
+
+# %% Q3: Fine-tuning on synthetic data
+print("\nQ3: Fine-tuning on synthetic data")
+print("Hypothesis: two-stage training (synth pre-train -> real fine-tune)")
+print("preserves signal better than naive concatenation.")
+
+if not synth_path.exists():
+    print("  SKIP: run 2606_simulate_synth.py first")
+else:
+    # Reload synth if not already loaded
+    if "X_synth" not in dir():
+        df_synth = pd.read_parquet(synth_path)
+        X_synth = df_synth[FEAT_COLS].values.astype(np.float32)
+        y_h_synth = df_synth["home_score"].clip(0, 5).values.astype(np.int64)
+        y_a_synth = df_synth["away_score"].clip(0, 5).values.astype(np.int64)
+
+    # --- Q3a: GBC pre-train on synth -> warm-start fine-tune on real ---
+    print("\n  Q3a: GBC synth pre-train -> real fine-tune")
+    t0 = _time.time()
+    N_PRETRAIN = 300
+    N_FINETUNE = 200
+
+    # Stage 1: pre-train on synthetic data
+    gbc_h_pre = GradientBoostingClassifier(
+        n_estimators=N_PRETRAIN, max_depth=4, learning_rate=0.05,
+        subsample=0.8, random_state=42, warm_start=True,
+    )
+    gbc_h_pre.fit(X_synth, y_h_synth)
+    gbc_a_pre = GradientBoostingClassifier(
+        n_estimators=N_PRETRAIN, max_depth=4, learning_rate=0.05,
+        subsample=0.8, random_state=42, warm_start=True,
+    )
+    gbc_a_pre.fit(X_synth, y_a_synth)
+
+    # Stage 2: fine-tune on real data (add more estimators fitted to real)
+    gbc_h_pre.n_estimators = N_PRETRAIN + N_FINETUNE
+    gbc_h_pre.fit(X_tr, y_home_tr)
+    gbc_a_pre.n_estimators = N_PRETRAIN + N_FINETUNE
+    gbc_a_pre.fit(X_tr, y_away_tr)
+
+    ph_v = gbc_h_pre.predict(X_va)
+    pa_v = gbc_a_pre.predict(X_va)
+    ph_t = gbc_h_pre.predict(X_te)
+    pa_t = gbc_a_pre.predict(X_te)
+    print(f"    ({_time.time()-t0:.0f}s)")
+    _eval("Q3a_gbc_finetune", ph_v, pa_v, ph_t, pa_t)
+
+    # --- Q3a_baseline: GBC real-only (same budget, no synth pre-train) ---
+    print("\n  Q3a_baseline: GBC real-only (same total estimators)")
+    t0 = _time.time()
+    gbc_h_base = GradientBoostingClassifier(
+        n_estimators=N_PRETRAIN + N_FINETUNE, max_depth=4,
+        learning_rate=0.05, subsample=0.8, random_state=42,
+    )
+    gbc_h_base.fit(X_tr, y_home_tr)
+    gbc_a_base = GradientBoostingClassifier(
+        n_estimators=N_PRETRAIN + N_FINETUNE, max_depth=4,
+        learning_rate=0.05, subsample=0.8, random_state=42,
+    )
+    gbc_a_base.fit(X_tr, y_away_tr)
+    ph_v = gbc_h_base.predict(X_va)
+    pa_v = gbc_a_base.predict(X_va)
+    ph_t = gbc_h_base.predict(X_te)
+    pa_t = gbc_a_base.predict(X_te)
+    print(f"    ({_time.time()-t0:.0f}s)")
+    _eval("Q3a_gbc_realonly", ph_v, pa_v, ph_t, pa_t)
+
+    # --- Q3b: Weighted mix (repeat real N times to upweight vs synth) ---
+    print("\n  Q3b: TabICL weighted mix (real repeated 5x + synth 1x)")
+    t0 = _time.time()
+    REAL_WEIGHT = 5
+    X_weighted = np.vstack(
+        [X_tr] * REAL_WEIGHT + [X_synth]
+    ).astype(np.float32)
+    y_h_weighted = np.concatenate(
+        [y_home_tr] * REAL_WEIGHT + [y_h_synth]
+    )
+    y_a_weighted = np.concatenate(
+        [y_away_tr] * REAL_WEIGHT + [y_a_synth]
+    )
+    print(f"    Real x{REAL_WEIGHT}={X_tr.shape[0]*REAL_WEIGHT} + "
+          f"Synth={len(X_synth)} = {len(X_weighted)}")
+
+    tab_h3 = _tabicl()
+    tab_h3.fit(X_weighted, y_h_weighted)
+    tab_a3 = _tabicl()
+    tab_a3.fit(X_weighted, y_a_weighted)
+    ph_v = tab_h3.predict(X_va)
+    pa_v = tab_a3.predict(X_va)
+    ph_t = tab_h3.predict(X_te)
+    pa_t = tab_a3.predict(X_te)
+    print(f"    ({_time.time()-t0:.0f}s)")
+    _eval("Q3b_weighted_5to1", ph_v, pa_v, ph_t, pa_t)
+
+    # --- Q3c: Synth-only baseline (signal check) ---
+    print("\n  Q3c: Synth-only (signal quality check)")
+    t0 = _time.time()
+    tab_h4 = _tabicl()
+    tab_h4.fit(X_synth, y_h_synth)
+    tab_a4 = _tabicl()
+    tab_a4.fit(X_synth, y_a_synth)
+    ph_v = tab_h4.predict(X_va)
+    pa_v = tab_a4.predict(X_va)
+    ph_t = tab_h4.predict(X_te)
+    pa_t = tab_a4.predict(X_te)
+    print(f"    ({_time.time()-t0:.0f}s)")
+    _eval("Q3c_synth_only", ph_v, pa_v, ph_t, pa_t)
+
+    # --- Q3d: Mirror + inverse synth (best aug + highest-signal synth) ---
+    print("\n  Q3d: Mirror + filtered synth (inverse-only, higher signal)")
+    t0 = _time.time()
+    df_inv_only = df_synth[df_synth["facet"] == "inverse"]
+    if len(df_inv_only) > 0:
+        X_inv = df_inv_only[FEAT_COLS].values.astype(np.float32)
+        y_h_inv = df_inv_only["home_score"].clip(0, 5).values.astype(np.int64)
+        y_a_inv = df_inv_only["away_score"].clip(0, 5).values.astype(np.int64)
+        X_best = np.vstack([X_aug_mirror, X_inv]).astype(np.float32)
+        y_h_best = np.concatenate([y_h_mirror, y_h_inv])
+        y_a_best = np.concatenate([y_a_mirror, y_a_inv])
+        print(f"    Mirror={X_aug_mirror.shape[0]} + Inverse={len(X_inv)} "
+              f"= {len(X_best)}")
+
+        tab_h5 = _tabicl()
+        tab_h5.fit(X_best, y_h_best)
+        tab_a5 = _tabicl()
+        tab_a5.fit(X_best, y_a_best)
+        ph_v = tab_h5.predict(X_va)
+        pa_v = tab_a5.predict(X_va)
+        ph_t = tab_h5.predict(X_te)
+        pa_t = tab_a5.predict(X_te)
+        print(f"    ({_time.time()-t0:.0f}s)")
+        _eval("Q3d_mirror_inv", ph_v, pa_v, ph_t, pa_t)
+    else:
+        print("    SKIP: no inverse facet in synth data")
 
 # %% Summary
 print(f"\n{'='*60}")

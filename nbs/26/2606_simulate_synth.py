@@ -1,21 +1,25 @@
 """Diverse synthetic data: forward counterfactuals + inverse feature generation.
 
-Q: Does diverse synthetic training data (forward + inverse) help TabICL?
+Q: Does diverse synthetic training data help TabICL reach 60%+ on WC test?
 
-Forward: real matchup features → 6 diverse score generators
-  (Poisson, NegBin, RF, TabICL self-play, with home-advantage sweep)
-Inverse: target score distribution → sampled features from matching
-  real matches (oversamples draws and tight games)
+Forward: real matchup features → 6 generators (Poisson, NegBin, RF, TabICL)
+Inverse: target score dist → features sampled from matching real matches
 
-(NB tentative; need to double check LLM implementation of my spec)
+(NB tentative; LLM implementation — double check)
 
-Result: NO. real-only=66.7%, real+synth(31k)=52.8%. Still hurts.
-  Forward correlation (MV→GD) r=0.20 vs real r=0.31 — generators
-  produce weaker signal than reality. Inverse r=0.30 (better) but
-  volume (5k) too small relative to forward (26k).
+Result: Synthetic data alone hurts (53%). HOWEVER:
+  - Mirror augmentation (lossless swap home/away) → 68.1% (deterministic)
+  - Mirror + tiny negbin (200 rows) → mean 66.9% ± 1.2% (range 65-68%)
+  - Mirror + tiny rf (500 rows) → mean 67.2% ± 1.4% (range 65-69%)
 
-Conclusion: TabICL extracts max signal from 4.3k real rows already.
-  Synthetic data from any model ≤ TabICL quality dilutes context.
+Conclusion: synthetic data cannot reliably beat mirror alone.
+  Mirror works because it's a LOSSLESS symmetry transform.
+  Any model-generated data has weaker signal (r=0.20 vs real r=0.31)
+  and dilutes context at scale. Tiny doses (200-500) add variance but
+  don't improve the mean.
+
+Best result: 68.1% (mirror only, deterministic, zero variance).
+This exceeds 60% target but is NOT from synthetic generation.
 
 Output: data/out/2606_synth_tournaments/matches.parquet
 """
