@@ -6,7 +6,6 @@ See 538's [pele](https://www.natesilver.net/p/pele-methodology) for infos on cho
 from __future__ import annotations
 
 import argparse
-import inspect
 import json
 import math
 import time
@@ -23,26 +22,12 @@ import pandas as pd
 
 from tk import datadir
 
-CacheItem = tuple[float, Any]
-
 BASE_URL = "https://tmapi-alpha.transfermarkt.technology/"
-DEFAULT_TIMEOUT = 5.0
-DEFAULT_TTL = 300.0
-TMAPI_BATCH_SIZE = 100
-DEFAULT_HEADERS = {
-    "Accept": "application/json",
-    "Accept-Language": "pt-BR",
-    "User-Agent": "Mozilla/5.0",
-}
-
-WORLD_CUP_YEARS = (2006, 2010, 2014, 2018, 2022, 2026)
-WORLD_CUP_START_DATES = {
-    2006: "2006-06-09", 2010: "2010-06-11", 2014: "2014-06-12",
-    2018: "2018-06-14", 2022: "2022-11-20", 2026: "2026-06-11",
-}
-
 COMPETITIONS = {
-    "FIWC": WORLD_CUP_START_DATES,
+    "FIWC": {
+        2006: "2006-06-09", 2010: "2010-06-11", 2014: "2014-06-12",
+        2018: "2018-06-14", 2022: "2022-11-20", 2026: "2026-06-11",
+    },
     "EURO": {
         2008: "2008-06-07", 2012: "2012-06-08", 2016: "2016-06-10",
         2021: "2021-06-11", 2024: "2024-06-14",
@@ -67,8 +52,6 @@ COMPETITIONS = {
         2019: "2019-06-15", 2021: "2021-07-10", 2023: "2023-06-24",
     },
 }
-
-MATCHES_CSV = datadir / "international_football" / "results.csv"
 TM_ROOT = datadir / "transfermarkt"
 
 ROSTER_COLS = [
@@ -84,109 +67,12 @@ FEAT_COLS = ["date_ordinal", "importance", "neutral"] + HOME_COLS + AWAY_COLS
 VALID_CUT = "2018-01-01"
 TEST_CUT = "2026-06-01"
 
-TOURNAMENT_IMPORTANCE = {
+TOURNAMENT_IMPORTANCE = {  # nate silver pele vals
     "Friendly": 1, "FIFA World Cup qualification": 3,
     "FIFA World Cup": 5, "UEFA Euro": 4, "UEFA Euro qualification": 3,
     "Copa América": 4, "AFC Asian Cup": 3, "African Cup of Nations": 3,
-    "CONCACAF Gold Cup": 3, "Confederations Cup": 3,
-}
-
-NAME_MAP = {
-    "Brasil": "Brazil", "Alemanha": "Germany", "França": "France",
-    "Espanha": "Spain", "Inglaterra": "England", "Holanda": "Netherlands",
-    "Itália": "Italy", "Argentina": "Argentina", "Portugal": "Portugal",
-    "Bélgica": "Belgium", "Croácia": "Croatia", "Uruguai": "Uruguay",
-    "Colômbia": "Colombia", "México": "Mexico", "Suíça": "Switzerland",
-    "Dinamarca": "Denmark", "Suécia": "Sweden", "Polônia": "Poland",
-    "Sérvia": "Serbia", "Senegal": "Senegal", "Marrocos": "Morocco",
-    "Japão": "Japan", "Coreia do Sul": "South Korea",
-    "Austrália": "Australia", "Irã": "Iran", "Arábia Saudita": "Saudi Arabia",
-    "Tunísia": "Tunisia", "Gana": "Ghana", "Camarões": "Cameroon",
-    "Nigéria": "Nigeria", "Costa do Marfim": "Ivory Coast",
-    "Argélia": "Algeria", "Egito": "Egypt", "EUA": "United States",
-    "Costa Rica": "Costa Rica", "Canadá": "Canada", "Equador": "Ecuador",
-    "Paraguai": "Paraguay", "Chile": "Chile", "Peru": "Peru",
-    "Honduras": "Honduras", "Panamá": "Panama", "Catar": "Qatar",
-    "País de Gales": "Wales", "Escócia": "Scotland",
-    "República Tcheca": "Czech Republic", "Ucrânia": "Ukraine",
-    "Rússia": "Russia", "Grécia": "Greece", "Eslováquia": "Slovakia",
-    "Eslovênia": "Slovenia", "Bósnia e Herzegovina": "Bosnia and Herzegovina",
-    "Togo": "Togo", "Angola": "Angola", "Trinidad e Tobago": "Trinidad and Tobago",
-    "Sérvia e Montenegro": "Serbia and Montenegro",
-    "República da Irlanda": "Republic of Ireland",
-    "África do Sul": "South Africa", "Nova Zelândia": "New Zealand",
-    "Coreia do Norte": "North Korea",
-    "Albânia": "Albania",
-    "Bahrein": "Bahrain",
-    "Benim": "Benin",
-    "Bermudas": "Bermuda",
-    "Bolívia": "Bolivia",
-    "Burquina Faso": "Burkina Faso",
-    "Burúndi": "Burundi",
-    "Cabo Verde": "Cape Verde",
-    "Comores": "Comoros",
-    "Emirados Árabes Unidos": "United Arab Emirates",
-    "Estados Unidos": "United States",
-    "Etiópia": "Ethiopia",
-    "Filipinas": "Philippines",
-    "Finlândia": "Finland",
-    "Gabão": "Gabon",
-    "Geórgia": "Georgia",
-    "Granada": "Grenada",
-    "Guadalupe": "Guadeloupe",
-    "Guiana": "Guyana",
-    "Guiana Francesa": "French Guiana",
-    "Guiné": "Guinea",
-    "Guiné Equatorial": "Equatorial Guinea",
-    "Guiné-Bissau": "Guinea-Bissau",
-    "Gâmbia": "Gambia",
-    "Hungria": "Hungary",
-    "Indonésia": "Indonesia",
-    "Iraque": "Iraq",
-    "Irlanda do Norte": "Northern Ireland",
-    "Islândia": "Iceland",
-    "Iémen": "Yemen",
-    "Jordânia": "Jordan",
-    "Líbano": "Lebanon",
-    "Líbia": "Libya",
-    "Macedônia do Norte": "North Macedonia",
-    "Madagáscar": "Madagascar",
-    "Malaui": "Malawi",
-    "Malásia": "Malaysia",
-    "Martinica": "Martinique",
-    "Mauritânia": "Mauritania",
-    "Moçambique": "Mozambique",
-    "Máli": "Mali",
-    "Namíbia": "Namibia",
-    "Nicarágua": "Nicaragua",
-    "Noruega": "Norway",
-    "Níger": "Niger",
-    "Omã": "Oman",
-    "Palestina": "Palestine",
-    "Quirguistão": "Kyrgyzstan",
-    "Quénia": "Kenya",
-    "República Democrática do Congo": "DR Congo",
-    "República do Congo": "Congo",
-    "Romênia": "Romania",
-    "Serra Leoa": "Sierra Leone",
-    "Sudão": "Sudan",
-    "São Cristóvão e Névis": "Saint Kitts and Nevis",
-    "Síria": "Syria",
-    "Tailândia": "Thailand",
-    "Tajiquistão": "Tajikistan",
-    "Tanzânia": "Tanzania",
-    "Tchéquia": "Czech Republic",
-    "Trindade e Tobago": "Trinidad and Tobago",
-    "Turquemenistão": "Turkmenistan",
-    "Turquia": "Turkey",
-    "Uzbequistão": "Uzbekistan",
-    "Vietnã": "Vietnam",
-    "Zimbábue": "Zimbabwe",
-    "Zâmbia": "Zambia",
-    "Áustria": "Austria",
-    "Índia": "India",
-    "Curaçau": "Curaçao",
-}
+    "CONCACAF Gold Cup": 3, "Confederations Cup": 3}
+NAME_MAP = {"Brasil": "Brazil", "Alemanha": "Germany", "França": "France", "Espanha": "Spain", "Inglaterra": "England", "Holanda": "Netherlands", "Itália": "Italy", "Argentina": "Argentina", "Portugal": "Portugal", "Bélgica": "Belgium", "Croácia": "Croatia", "Uruguai": "Uruguay", "Colômbia": "Colombia", "México": "Mexico", "Suíça": "Switzerland", "Dinamarca": "Denmark", "Suécia": "Sweden", "Polônia": "Poland", "Sérvia": "Serbia", "Senegal": "Senegal", "Marrocos": "Morocco", "Japão": "Japan", "Coreia do Sul": "South Korea", "Austrália": "Australia", "Irã": "Iran", "Arábia Saudita": "Saudi Arabia", "Tunísia": "Tunisia", "Gana": "Ghana", "Camarões": "Cameroon", "Nigéria": "Nigeria", "Costa do Marfim": "Ivory Coast", "Argélia": "Algeria", "Egito": "Egypt", "EUA": "United States", "Costa Rica": "Costa Rica", "Canadá": "Canada", "Equador": "Ecuador", "Paraguai": "Paraguay", "Chile": "Chile", "Peru": "Peru", "Honduras": "Honduras", "Panamá": "Panama", "Catar": "Qatar", "País de Gales": "Wales", "Escócia": "Scotland", "República Tcheca": "Czech Republic", "Ucrânia": "Ukraine", "Rússia": "Russia", "Grécia": "Greece", "Eslováquia": "Slovakia", "Eslovênia": "Slovenia", "Bósnia e Herzegovina": "Bosnia and Herzegovina", "Togo": "Togo", "Angola": "Angola", "Trinidad e Tobago": "Trinidad and Tobago", "Sérvia e Montenegro": "Serbia and Montenegro", "República da Irlanda": "Republic of Ireland", "África do Sul": "South Africa", "Nova Zelândia": "New Zealand", "Coreia do Norte": "North Korea", "Albânia": "Albania", "Bahrein": "Bahrain", "Benim": "Benin", "Bermudas": "Bermuda", "Bolívia": "Bolivia", "Burquina Faso": "Burkina Faso", "Burúndi": "Burundi", "Cabo Verde": "Cape Verde", "Comores": "Comoros", "Emirados Árabes Unidos": "United Arab Emirates", "Estados Unidos": "United States", "Etiópia": "Ethiopia", "Filipinas": "Philippines", "Finlândia": "Finland", "Gabão": "Gabon", "Geórgia": "Georgia", "Granada": "Grenada", "Guadalupe": "Guadeloupe", "Guiana": "Guyana", "Guiana Francesa": "French Guiana", "Guiné": "Guinea", "Guiné Equatorial": "Equatorial Guinea", "Guiné-Bissau": "Guinea-Bissau", "Gâmbia": "Gambia", "Hungria": "Hungary", "Indonésia": "Indonesia", "Iraque": "Iraq", "Irlanda do Norte": "Northern Ireland", "Islândia": "Iceland", "Iémen": "Yemen", "Jordânia": "Jordan", "Líbano": "Lebanon", "Líbia": "Libya", "Macedônia do Norte": "North Macedonia", "Madagáscar": "Madagascar", "Malaui": "Malawi", "Malásia": "Malaysia", "Martinica": "Martinique", "Mauritânia": "Mauritania", "Moçambique": "Mozambique", "Máli": "Mali", "Namíbia": "Namibia", "Nicarágua": "Nicaragua", "Noruega": "Norway", "Níger": "Niger", "Omã": "Oman", "Palestina": "Palestine", "Quirguistão": "Kyrgyzstan", "Quénia": "Kenya", "República Democrática do Congo": "DR Congo", "República do Congo": "Congo", "Romênia": "Romania", "Serra Leoa": "Sierra Leone", "Sudão": "Sudan", "São Cristóvão e Névis": "Saint Kitts and Nevis", "Síria": "Syria", "Tailândia": "Thailand", "Tajiquistão": "Tajikistan", "Tanzânia": "Tanzania", "Tchéquia": "Czech Republic", "Trindade e Tobago": "Trinidad and Tobago", "Turquemenistão": "Turkmenistan", "Turquia": "Turkey", "Uzbequistão": "Uzbekistan", "Vietnã": "Vietnam", "Zimbábue": "Zimbabwe", "Zâmbia": "Zambia", "Áustria": "Austria", "Índia": "India", "Curaçau": "Curaçao", }
 
 WC_FINAL_RANK = {
     2006: ["Itália", "França", "Alemanha", "Portugal"],
@@ -209,41 +95,41 @@ class Endpoint:
 ENDPOINTS = {
     "attributes": Endpoint("attributes"),
     "tmsearch": Endpoint("quick-search", required_query=("term",)),
-    "get_player_profile": Endpoint("player/{player_id}", ("player_id",)),
-    "get_players_info": Endpoint("players", ids_query=True),
-    "get_player_gallery": Endpoint("player/{player_id}/gallery", ("player_id",)),
-    "get_player_performance": Endpoint("player/{player_id}/performance", ("player_id",), optional_query=("season",)),
-    "get_player_injuries": Endpoint("player/{player_id}/injury", ("player_id",)),
-    "get_player_market_value_history": Endpoint("player/{player_id}/market-value-history", ("player_id",)),
-    "get_player_national_career": Endpoint("player/{player_id}/national-career-history", ("player_id",)),
-    "get_player_transfer_history": Endpoint("transfer/history/player/{player_id}", ("player_id",)),
-    "get_players_performance": Endpoint("players/performance"),
-    "get_club_info": Endpoint("club/{club_id}", ("club_id",)),
-    "get_clubs_info": Endpoint("clubs", ids_query=True),
-    "get_club_squad": Endpoint("club/{club_id}/squad", ("club_id",)),
-    "get_club_stadium": Endpoint("club/{club_id}/stadium", ("club_id",)),
-    "get_club_transfer_history": Endpoint("transfer/history/club/{club_id}", ("club_id",)),
-    "get_competition_info": Endpoint("competition/{code}", ("code",)),
-    "get_competition_table": Endpoint("competition/{code}/table", ("code",)),
-    "get_competitions_info": Endpoint("competitions", ids_query=True),
-    "get_game": Endpoint("game/{game_id}", ("game_id",)),
-    "get_game_live_detail": Endpoint("game/{game_id}/live-detail", ("game_id",)),
-    "get_referee_profile": Endpoint("referee/{referee_id}", ("referee_id",)),
-    "get_referees_info": Endpoint("referees", ids_query=True),
-    "get_coach_profile": Endpoint("coach/{coach_id}", ("coach_id",)),
-    "get_coaches_info": Endpoint("coaches", ids_query=True),
-    "get_stadium_info": Endpoint("stadium/{stadium_id}", ("stadium_id",)),
+    "player_profile": Endpoint("player/{player_id}", ("player_id",)),
+    "players_info": Endpoint("players", ids_query=True),
+    "player_gallery": Endpoint("player/{player_id}/gallery", ("player_id",)),
+    "player_performance": Endpoint("player/{player_id}/performance", ("player_id",), optional_query=("season",)),
+    "player_injuries": Endpoint("player/{player_id}/injury", ("player_id",)),
+    "player_market_value_history": Endpoint("player/{player_id}/market-value-history", ("player_id",)),
+    "player_national_career": Endpoint("player/{player_id}/national-career-history", ("player_id",)),
+    "player_transfer_history": Endpoint("transfer/history/player/{player_id}", ("player_id",)),
+    "players_performance": Endpoint("players/performance"),
+    "club_info": Endpoint("club/{club_id}", ("club_id",)),
+    "clubs_info": Endpoint("clubs", ids_query=True),
+    "club_squad": Endpoint("club/{club_id}/squad", ("club_id",)),
+    "club_stadium": Endpoint("club/{club_id}/stadium", ("club_id",)),
+    "club_transfer_history": Endpoint("transfer/history/club/{club_id}", ("club_id",)),
+    "competition_info": Endpoint("competition/{code}", ("code",)),
+    "competition_table": Endpoint("competition/{code}/table", ("code",)),
+    "competitions_info": Endpoint("competitions", ids_query=True),
+    "game": Endpoint("game/{game_id}", ("game_id",)),
+    "game_live_detail": Endpoint("game/{game_id}/live-detail", ("game_id",)),
+    "referee_profile": Endpoint("referee/{referee_id}", ("referee_id",)),
+    "referees_info": Endpoint("referees", ids_query=True),
+    "coach_profile": Endpoint("coach/{coach_id}", ("coach_id",)),
+    "coaches_info": Endpoint("coaches", ids_query=True),
+    "stadium_info": Endpoint("stadium/{stadium_id}", ("stadium_id",)),
 }
 
 
 @dataclass
 class TmClient:
     base_url: str = BASE_URL
-    timeout: float = DEFAULT_TIMEOUT
-    ttl: float = DEFAULT_TTL
+    timeout: float = 5.0
+    ttl: float = 300.0
     use_cache: bool = True
-    headers: dict[str, str] = field(default_factory=lambda: DEFAULT_HEADERS.copy())
-    cache: dict[str, CacheItem] = field(default_factory=dict)
+    headers: dict = field(default_factory=lambda: {"Accept": "application/json", "Accept-Language": "pt-BR", "User-Agent": "Mozilla/5.0"})
+    cache: dict[str, tuple[float, Any]] = field(default_factory=dict)
 
     def fetch(self, endpoint: str) -> Any:
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
@@ -279,14 +165,14 @@ class TmClient:
 
     attributes = partialmethod(call, "attributes")
     tmsearch = partialmethod(call, "tmsearch")
-    get_player_profile = partialmethod(call, "get_player_profile")
-    get_players_info = partialmethod(call, "get_players_info")
-    get_player_market_value_history = partialmethod(call, "get_player_market_value_history")
-    get_club_info = partialmethod(call, "get_club_info")
-    get_clubs_info = partialmethod(call, "get_clubs_info")
-    get_club_squad = partialmethod(call, "get_club_squad")
-    get_competition_info = partialmethod(call, "get_competition_info")
-    get_competition_table = partialmethod(call, "get_competition_table")
+    player_profile = partialmethod(call, "player_profile")
+    players_info = partialmethod(call, "players_info")
+    player_market_value_history = partialmethod(call, "player_market_value_history")
+    club_info = partialmethod(call, "club_info")
+    clubs_info = partialmethod(call, "clubs_info")
+    club_squad = partialmethod(call, "club_squad")
+    competition_info = partialmethod(call, "competition_info")
+    competition_table = partialmethod(call, "competition_table")
 
 
 def _ratio(n, d): return n / d if d else None
@@ -465,7 +351,7 @@ def fetch_player_histories(client: TmClient, player_ids: Sequence[str], cache_di
         if path.exists():
             histories[player_id] = json.loads(path.read_text())
             continue
-        data = client.get_player_market_value_history(player_id)["data"]
+        data = client.player_market_value_history(player_id)["data"]
         histories[player_id] = data
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     return histories
@@ -500,12 +386,12 @@ def fetch_comp_year(
     club_ids = [row["clubId"] for row in rows]
     club_rows = {row["clubId"]: row for row in rows}
 
-    clubs = get_batched_rows(club_ids, client.get_clubs_info)
+    clubs = get_batched_rows(club_ids, client.clubs_info)
     (out / "clubs.json").write_text(json.dumps(clubs, ensure_ascii=False, indent=2))
 
     squads = fetch_squads(client, club_ids, season, out)
     player_ids = sorted({pid for squad in squads.values() for pid in squad["playerIds"]}, key=int)
-    players = get_batched_rows(player_ids, client.get_players_info)
+    players = get_batched_rows(player_ids, client.players_info)
     player_ids = sorted(players, key=int)
     (out / "player_profiles_current.json").write_text(json.dumps(players, ensure_ascii=False, indent=2))
 
@@ -516,7 +402,7 @@ def fetch_comp_year(
     (out / "player_snapshots.json").write_text(json.dumps(snapshots, ensure_ascii=False, indent=2))
 
     snap_club_ids = sorted({cid for p in snapshots.values() if (cid := _club_id(p))}, key=int)
-    current_clubs = get_batched_rows(snap_club_ids, client.get_clubs_info)
+    current_clubs = get_batched_rows(snap_club_ids, client.clubs_info)
     (out / "clubs_at_value.json").write_text(json.dumps(current_clubs, ensure_ascii=False, indent=2))
 
     attributes = client.attributes()["data"]
@@ -569,7 +455,7 @@ def get_team_vec(db: dict[str, dict[int, list[float]]], team: str, year: int) ->
 
 
 def load_match_dataset(tm_db: dict[str, dict[int, list[float]]]) -> pd.DataFrame:
-    df = pd.read_csv(MATCHES_CSV)
+    df = pd.read_csv(datadir / "international_football" / "results.csv")
     df = df[df["date"] >= "2006-01-01"].copy()
     df["year"] = pd.to_datetime(df["date"]).dt.year
     df["importance"] = df["tournament"].apply(lambda t: next(
@@ -627,23 +513,23 @@ def compute_metrics(
         "n_draws_actual": int((true_outcome == 1).sum()),
     }
 
-def main(argv: Sequence[str] | None = None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=sorted(ENDPOINTS))
     parser.add_argument("values", nargs="*")
-    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
-    parser.add_argument("--ttl", type=float, default=DEFAULT_TTL)
     parser.add_argument("--no-cache", action="store_true")
-    args = parser.parse_args(argv)
-    client = TmClient(timeout=args.timeout, ttl=args.ttl, use_cache=not args.no_cache)
+    args = parser.parse_args()
+    client = TmClient(use_cache=not args.no_cache)
     if spec := ENDPOINTS.get(args.command):
         names = [*spec.path_args, *spec.required_query]
         if spec.ids_query:
             names.append("ids")
+        if len(args.values) < len(names):
+            parser.error(f"{args.command} requires: {' '.join(names)}")
         params = dict(zip(names, args.values, strict=True))
         if spec.ids_query:
             params["ids"] = [part.strip() for part in args.values[-1].split(",")]
-        result = client.call(name, **params)  # type: ignore[arg-type]
+        result = client.call(args.command, **params)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "fetch_all":
         for comp_id, years in COMPETITIONS.items():
@@ -655,9 +541,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     print(json.dumps(summary, ensure_ascii=False), flush=True)
                 except Exception as e:
                     print(f"ERROR {comp_id}/{year}: {e}", flush=True)
-    elif args.comamnd == "analyze":
+    elif args.command == "analyze":
         rows = []
-        for year in WORLD_CUP_YEARS:
+        for year in (2006, 2010, 2014, 2018, 2022, 2026):
             if not (path := TM_ROOT / "fiwc" / str(year) / "team_features.json").exists():
                 continue
             if not (podium := WC_FINAL_RANK.get(year)):
@@ -680,5 +566,3 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"\nSummary across {len(rows)} tournaments")
             print(f"  Avg winner value rank: {sum(r['winnerValueRank'] for r in rows) / len(rows):.1f}")
             print(f"  Avg podium in top-8: {sum(r['top4inTop8value'] for r in rows) / len(rows):.1f}/4")
-
-    return 0
