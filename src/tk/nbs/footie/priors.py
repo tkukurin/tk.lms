@@ -210,7 +210,10 @@ class RankingGoalSampler:
         )
         rows = []
         for sim in range(n_sims):
-            part = matches[["date", "home_team", "away_team"]].copy()
+            # Preserve the original match feature columns. For fine-tuning, the
+            # synthetic target is useful only if it remains paired with the same
+            # feature schema consumed by TabICL.
+            part = matches.copy()
             part["sim"] = sim
             part["home_score"] = home_score[sim].astype(int)
             part["away_score"] = away_score[sim].astype(int)
