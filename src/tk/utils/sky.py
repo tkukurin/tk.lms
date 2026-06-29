@@ -8,6 +8,7 @@ be uploaded instead of using ``.gitignore``.
 from __future__ import annotations
 
 import subprocess
+import sky as _sky
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -29,7 +30,6 @@ def task(
     **kw,
 ):
     """Build a SkyPilot task with setup/run logging and optional artifacts."""
-    import sky as _sky  # pyright: ignore[reportMissingImports]
 
     bucket = None
     globs: tuple[str, ...] = ()
@@ -57,22 +57,8 @@ def task(
         "  exit $s; }; trap setup_finish EXIT"
     )
 
-    setup = "\n".join([
-        "set -euo pipefail",
-        setup_trap,
-        "{",
-        "set -x",
-        *setup_lines,
-        "} 2>&1 | tee setup.log",
-        "",
-    ])
-    run = "\n".join([
-        "set -euo pipefail",
-        trap,
-        *run_prefix_lines,
-        f"{python} -u {cmd} 2>&1 | tee run.log",
-        "",
-    ])
+    setup = "\n".join(["set -euo pipefail", setup_trap, "{", "set -x", *setup_lines, "} 2>&1 | tee setup.log", ""])
+    run = "\n".join(["set -euo pipefail", trap, *run_prefix_lines, f"{python} -u {cmd} 2>&1 | tee run.log", ""])
 
     return _sky.Task(
         name=cluster,
@@ -87,8 +73,7 @@ def task(
         ),
         setup=setup,
         run=run,
-        **kw,
-    )
+        **kw)
 
 
 def exec(
@@ -109,7 +94,6 @@ def exec(
     **kw,
 ):
     """Build a SkyPilot task, launch it, and stream logs."""
-    import sky as _sky  # pyright: ignore[reportMissingImports]
     t = task(
         cmd,
         cluster=cluster,

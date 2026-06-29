@@ -1,10 +1,16 @@
-"""Score priors using Transfermarkt features plus cached FIFA and World Elo rankings."""
+"""Score priors using Transfermarkt features plus cached FIFA and World Elo rankings.
+
+The low-level ``RankingGoalSampler`` fits one global goal model. ``FootiePriorSampler``
+wraps it in a TabICL-style task prior: each task samples a subset of contexts and a
+small perturbation of the scoring process, then rejects implausible generated tasks.
+"""
 # pyright: reportArgumentType=false, reportReturnType=false
 from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -274,6 +280,220 @@ def _rng(random_state: int | np.random.Generator | None) -> np.random.Generator:
         if isinstance(random_state, np.random.Generator)
         else np.random.default_rng(random_state)
     )
+
+
+@dataclass(frozen=True)
+class FootiePriorConfig:
+    n_tasks: int = 64
+    min_seq_len: int = 300
+    max_seq_len: int = 1200
+    min_train_frac: float = 0.4
+    max_train_frac: float = 0.9
+    max_attempts_per_task: int = 50
+    min_outcome_share: float = 0.05
+    min_draw_rate: float = 0.12
+    max_draw_rate: float = 0.42
+    min_home_goals: float = 0.7
+    max_home_goals: float = 2.4
+    min_away_goals: float = 0.5
+    max_away_goals: float = 2.0
+    min_strength_corr: float = 0.03
+    coef_jitter_min: float = 0.02
+    coef_jitter_max: float = 0.25
+    intercept_jitter: float = 0.12
+
+
+@dataclass(frozen=True)
+class FootiePriorTask:
+    task_id: int
+    df: pd.DataFrame
+    train_size: int
+    hp: dict[str, Any]
+
+
+@dataclass
+class FootiePriorSampler:
+    base_matches: pd.DataFrame
+    goal_sampler: RankingGoalSampler
+    config: FootiePriorConfig = field(default_factory=FootiePriorConfig)
+
+    @classmethod
+    def from_matches(
+        cls,
+        matches: pd.DataFrame,
+        config: FootiePriorConfig | None = None,
+    ) -> FootiePriorSampler:
+        ranked = FifaRankingProvider.from_cache().attach(matches.copy())
+        ranked = EloRankingProvider.from_cache().attach(ranked)
+        sampler = RankingGoalSampler().fit(ranked)
+        return cls(
+            base_matches=ranked,
+            goal_sampler=sampler,
+            config=config or FootiePriorConfig(),
+        )
+
+    def sample_rows(
+        self,
+        n_tasks: int | None = None,
+        random_state: int | np.random.Generator | None = None,
+    ) -> pd.DataFrame:
+        rng = _rng(random_state)
+        tasks = self.sample_tasks(n_tasks=n_tasks, rng=rng)
+        return pd.concat([task.df for task in tasks], ignore_index=True)
+
+    def sample_tasks(
+        self,
+        n_tasks: int | None = None,
+        rng: np.random.Generator | None = None,
+    ) -> list[FootiePriorTask]:
+        rng = _rng(rng)
+        total = n_tasks or self.config.n_tasks
+        tasks = []
+        for task_id in range(total):
+            tasks.append(self.sample_task(task_id, rng))
+        return tasks
+
+    def sample_task(self, task_id: int, rng: np.random.Generator) -> FootiePriorTask:
+        for _ in range(self.config.max_attempts_per_task):
+            hp = self.sample_hp(rng)
+            contexts = self.sample_contexts(hp, rng)
+            df_task = self.sample_scores(contexts, hp, rng)
+            if self.is_valid_task(df_task):
+                train_size = int(len(df_task) * hp["train_frac"])
+                df_task.insert(0, "task_id", task_id)
+                df_task["task_train_size"] = train_size
+                df_task["generator"] = "footie_task_prior"
+                df_task["facet"] = "task_prior"
+                return FootiePriorTask(
+                    task_id=task_id,
+                    df=df_task,
+                    train_size=train_size,
+                    hp=hp,
+                )
+        raise RuntimeError(f"failed to sample valid football prior task {task_id}")
+
+    def sample_hp(self, rng: np.random.Generator) -> dict[str, Any]:
+        return {
+            "seq_len": _sample_log_int(
+                rng, self.config.min_seq_len, self.config.max_seq_len,
+            ),
+            "train_frac": rng.uniform(
+                self.config.min_train_frac, self.config.max_train_frac,
+            ),
+            "dispersion": float(np.exp(rng.uniform(np.log(3.0), np.log(20.0)))),
+            "draw_coupling": float(rng.uniform(0.02, 0.18)),
+            "coef_sigma": float(rng.uniform(
+                self.config.coef_jitter_min, self.config.coef_jitter_max,
+            )),
+            "home_intercept": float(rng.normal(0.0, self.config.intercept_jitter)),
+            "away_intercept": float(rng.normal(0.0, self.config.intercept_jitter)),
+            "importance_power": float(rng.uniform(-0.5, 1.5)),
+            "wc_focus": bool(rng.random() < 0.35),
+            "era_center": int(rng.integers(2008, 2027)),
+            "era_width": float(rng.uniform(2.0, 10.0)),
+            "home_coef_mult": None,
+            "away_coef_mult": None,
+        }
+
+    def sample_contexts(self, hp: dict[str, Any], rng: np.random.Generator) -> pd.DataFrame:
+        df = self.base_matches.copy()
+        weights = np.ones(len(df), dtype=float)
+        importance = _col(df, "importance").clip(lower=1.0).to_numpy(dtype=float)
+        weights *= importance ** hp["importance_power"]
+        if hp["wc_focus"]:
+            weights *= np.where(df["tournament"].astype(str).to_numpy() == "FIFA World Cup", 4.0, 1.0)
+        years = pd.to_datetime(df["date"]).dt.year.to_numpy(dtype=float)
+        weights *= np.exp(-np.abs(years - hp["era_center"]) / hp["era_width"])
+        weights = np.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
+        if weights.sum() <= 0:
+            weights = np.ones(len(df), dtype=float)
+        weights /= weights.sum()
+        seq_len = min(int(hp["seq_len"]), len(df))
+        idx = rng.choice(len(df), size=seq_len, replace=False, p=weights)
+        out = df.iloc[idx].copy()
+        return out.sort_values("date", kind="mergesort").reset_index(drop=True)
+
+    def sample_scores(
+        self,
+        contexts: pd.DataFrame,
+        hp: dict[str, Any],
+        rng: np.random.Generator,
+    ) -> pd.DataFrame:
+        home_lambda, away_lambda = self.task_lambdas(contexts, hp, rng)
+        sampler = RankingGoalSampler(
+            config=RankingGoalSamplerConfig(
+                dispersion=float(hp["dispersion"]),
+                draw_coupling=float(hp["draw_coupling"]),
+                max_goals=self.goal_sampler.config.max_goals,
+                poisson_alpha=self.goal_sampler.config.poisson_alpha,
+            ),
+        )
+        home_score, away_score = sampler.sample_score_arrays(
+            home_lambda, away_lambda, n_sims=1, rng=rng,
+        )
+        out = contexts.copy()
+        out["home_score"] = home_score[0].astype(int)
+        out["away_score"] = away_score[0].astype(int)
+        out["outcome"] = np.where(
+            out["home_score"] > out["away_score"],
+            2,
+            np.where(out["home_score"] == out["away_score"], 1, 0),
+        )
+        out["home_lambda"] = home_lambda
+        out["away_lambda"] = away_lambda
+        return out
+
+    def task_lambdas(
+        self,
+        contexts: pd.DataFrame,
+        hp: dict[str, Any],
+        rng: np.random.Generator,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        if self.goal_sampler.home_model is None or self.goal_sampler.away_model is None:
+            raise RuntimeError("fit RankingGoalSampler before sampling tasks")
+        X = self.goal_sampler.design_matrix(contexts)
+        home_coef = self.goal_sampler.home_model.coef_.copy()
+        away_coef = self.goal_sampler.away_model.coef_.copy()
+        sigma = float(hp["coef_sigma"])
+        home_coef *= rng.lognormal(mean=0.0, sigma=sigma, size=home_coef.shape)
+        away_coef *= rng.lognormal(mean=0.0, sigma=sigma, size=away_coef.shape)
+        log_home = (
+            self.goal_sampler.home_model.intercept_
+            + float(hp["home_intercept"])
+            + X @ home_coef
+        )
+        log_away = (
+            self.goal_sampler.away_model.intercept_
+            + float(hp["away_intercept"])
+            + X @ away_coef
+        )
+        return np.clip(np.exp(log_home), 0.05, 6.5), np.clip(np.exp(log_away), 0.05, 6.5)
+
+    def is_valid_task(self, df: pd.DataFrame) -> bool:
+        y = np.asarray(df["outcome"], dtype=int)
+        counts = np.bincount(y, minlength=3) / max(len(y), 1)
+        if (counts < self.config.min_outcome_share).any():
+            return False
+        draw_rate = counts[1]
+        if not self.config.min_draw_rate <= draw_rate <= self.config.max_draw_rate:
+            return False
+        home_goals = float(df["home_score"].mean())
+        away_goals = float(df["away_score"].mean())
+        if not self.config.min_home_goals <= home_goals <= self.config.max_home_goals:
+            return False
+        if not self.config.min_away_goals <= away_goals <= self.config.max_away_goals:
+            return False
+        strength = _col(df, "world_elo_rating_diff").to_numpy(dtype=float)
+        gd = (df["home_score"] - df["away_score"]).to_numpy(dtype=float)
+        if np.nanstd(strength) > 1e-6 and np.nanstd(gd) > 1e-6:
+            corr = float(np.corrcoef(strength, gd)[0, 1])
+            if np.isfinite(corr) and corr < self.config.min_strength_corr:
+                return False
+        return True
+
+
+def _sample_log_int(rng: np.random.Generator, lo: int, hi: int) -> int:
+    return int(round(np.exp(rng.uniform(np.log(lo), np.log(hi)))))
 
 
 def setup_backtest_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:

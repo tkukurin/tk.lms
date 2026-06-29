@@ -1,0 +1,51 @@
+# SkyPilot workdir sync allowlist-by-exclusion.
+# Presence of this file makes SkyPilot use it instead of .gitignore,
+# so data/ can be synced selectively.
+
+# VCS/env/build/cache
+/.git/
+/.venv/
+/.pixi/
+/.pytest_cache/
+/.mypy_cache/
+/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# Local/editor/runtime noise
+/.zed/
+/.env
+/wandb/
+/.aim/
+*tfevents*
+*.log
+
+# Build artifacts
+/build/
+/dist/
+/*.egg-info/
+
+# Large or irrelevant data dirs. Keep data/international_football and
+# data/transfermarkt tournament snapshots available for footie experiments.
+/data/out/
+/data/cache/
+/data/repos/
+/data/ARC-AGI/
+/data/bgnano/
+/data/bgnano2/
+/data/worldcupsai/
+
+# Transfermarkt per-player history caches are not needed by load_tm_features().
+/data/transfermarkt/_player_market_value_history/
+/data/transfermarkt/*/_player_market_value_history/
+
+# Misc root-level sample data not needed remotely.
+/data/*.json
+/data/*.jsonl
+/data/*.txt
+
+# Large checkpoints should come from HF or explicit output artifacts.
+*.ckpt
+*.pt
