@@ -592,7 +592,6 @@ def fetch_elo_ratings(
         teams_path.write_text(_get_text(f"{ELO_RATINGS_BASE_URL}/en.teams.tsv", timeout=timeout))
         paths.append(teams_path)
     headers = {
-        "start": "marker\trank\tcode\trating",
         "results": "\t".join([
             "year", "month", "day", "home_code", "away_code",
             "home_score", "away_score", "match_type", "venue", "margin",
@@ -604,11 +603,14 @@ def fetch_elo_ratings(
         out_dir = root / f"{year}"
         out_dir.mkdir(parents=True, exist_ok=True)
         for name in ("start", "results"):
-            if (out := out_dir / f"{name}.tsv").exists():
+            out = out_dir / f"{name}.tsv"
+            if out.exists():
                 paths.append(out)
                 continue
             text = _get_text(f"{ELO_RATINGS_BASE_URL}/{int(year)}_{name}.tsv", timeout=timeout)
-            out.write_text(headers[name] + "\n" + text)
+            if header := headers.get(name):
+                text = header + "\n" + text
+            out.write_text(text)
             paths.append(out)
             if sleep_s:
                 time.sleep(sleep_s)
@@ -630,7 +632,7 @@ def _load_elo_team_names(root: Path = ELO_RATINGS_ROOT) -> dict[str, str]:
 
 def _elo_snapshot_rows(path: Path, date: Any, teams: dict[str, str], source: str) -> list[dict[str, Any]]:
     rows = []
-    df = pd.read_csv(path, sep="\t", usecols=["rank", "code", "rating"])
+    df = pd.read_csv(path, sep="\t", header=None, usecols=[1, 2, 3], names=["rank", "code", "rating"], keep_default_na=False)
     for _, r in df.iterrows():
         code = r["code"]
         rows.append({
@@ -646,10 +648,11 @@ def _elo_snapshot_rows(path: Path, date: Any, teams: dict[str, str], source: str
 
 def _elo_result_rows(path: Path, teams: dict[str, str]) -> list[dict[str, Any]]:
     rows = []
-    df = pd.read_csv(path, sep="\t", usecols=[
+    df = pd.read_csv(path, sep="\t", keep_default_na=False, usecols=[
         "year", "month", "day", "home_code", "away_code",
         "home_rating", "away_rating", "home_rank", "away_rank",
     ])
+    df = df[(df["month"] > 0) & (df["day"] > 0)]
     for _, r in df.iterrows():
         date = pd.Timestamp(year=int(r["year"]), month=int(r["month"]), day=int(r["day"]))
         for side in ("home", "away"):
