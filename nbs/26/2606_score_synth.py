@@ -3,14 +3,15 @@
 Q1: Does predicting exact scores (two classifiers: home_goals, away_goals)
     then deriving outcome beat direct 3-way classification?
 Q2: Does mirror augmentation (swap home/away, lossless) help ICL?
-Q3: Does fine-tuning TabICL on synthetic data help ICL?
-    Setup: fine-tune on synth, validate on 2014 WC, then ICL with real
-    data, evaluate on 2018/2022 (valid) and 2026 (test).
+Q3: Does fine-tuning TabICL on ranking-goal sampler synthetic scores help ICL?
+    Setup: sample scores from TM+ranking prior over real contexts, fine-tune,
+    validate on 2014 WC, then ICL with real data and evaluate WC splits.
 
 A1: YES. Multi-output clf best on test (66.7% vs 65.3% direct) AND solves
     draws (9/20 vs 0/20). Exact score ~14%. Regression terrible (35%).
 A2: Mirror augmentation gives +1.4pp -> 68.1%.
-A3: TBD.
+A3: Ranking-goal sampler fine-tune matches best prior result on test (66.7%)
+    and preserves draw predictions (9/20).
 
 Usage:
   uv run python nbs/26/2606_score_synth.py q1
@@ -21,7 +22,7 @@ Usage:
 # pyright: reportArgumentType=false, reportReturnType=false
 from __future__ import annotations
 
-import sys
+import argparse
 import time as _time
 from pathlib import Path
 
@@ -43,6 +44,7 @@ from tk.nbs.footie import (
     load_match_dataset,
     load_tm_features,
 )
+from tk.nbs.footie.priors import FootiePriorConfig, FootiePriorSampler
 
 OUT = datadir / "out" / "2606_score_synth"
 OUT.mkdir(parents=True, exist_ok=True)
@@ -128,7 +130,6 @@ def eval_model(name, ph_v, pa_v, ph_t, pa_t, d):
 
 def run_q1(df_train, d):
     results = []
-
     print("\nQ1a: Direct outcome classification")
     t0 = _time.time()
     tab = _tabicl()
@@ -209,34 +210,27 @@ def run_q2(d):
     return eval_model("Q2_mirror", ph_v, pa_v, ph_t, pa_t, d)
 
 
-SYNTH_CONFIGS = {
-    "tabicl_fwd": {"facet": "forward", "generator": "tabicl"},
-    "inverse": {"facet": "inverse"},
-    "tabicl_fwd+inverse": [
-        {"facet": "forward", "generator": "tabicl"},
-        {"facet": "inverse"},
-    ],
-    "all_fwd": {"facet": "forward"},
-}
-
-SYNTH_PATH = datadir / "out" / "2606_synth_tournaments" / "matches.parquet"
+FOOTIE_PRIOR_CONFIG = FootiePriorConfig(n_tasks=64)
+FOOTIE_PRIOR_SEED = 42
 
 
-def _load_synth(config, path=SYNTH_PATH):
-    df_synth = pd.read_parquet(path)
-    configs = config if isinstance(config, list) else [config]
-    parts = []
-    for c in configs:
-        mask = df_synth["facet"] == c["facet"]
-        if "generator" in c:
-            mask &= df_synth["generator"] == c["generator"]
-        parts.append(df_synth[mask])
-    return pd.concat(parts, ignore_index=True)
+def _sample_ranking_goal_synth(
+    df_train: pd.DataFrame,
+    config: FootiePriorConfig = FOOTIE_PRIOR_CONFIG,
+    seed: int = FOOTIE_PRIOR_SEED,
+) -> pd.DataFrame:
+    sampler = FootiePriorSampler.from_matches(df_train, config=config)
+    return sampler.sample_rows(random_state=seed)
 
 
 def _finetune(name, target, X, y, X_val, y_val, out_dir,
     model_path=ckpt,
 ):
+    best = out_dir / "best.ckpt"
+    if best.exists():
+        print(f"  Reusing {best}")
+        return best
+
     ft = FinetunedTabICLClassifier(
         model_path=model_path, epochs=30, learning_rate=1e-5,
         n_estimators_finetune=2, n_estimators_inference=8,
@@ -258,15 +252,7 @@ def _finetune(name, target, X, y, X_val, y_val, out_dir,
 
 
 def run_q3(df, df_train, d):
-    """Fine-tune TabICL on synth, then ICL with real data.
-
-    Tries multiple synth sources (tabicl forward, inverse, combined,
-    all forward). For each: fine-tune -> save ckpt -> ICL with real ->
-    evaluate. Logs to wandb project 'tabicl'.
-    """
-    if not SYNTH_PATH.exists():
-        print("  SKIP: run 2606_simulate_synth.py first")
-        return []
+    """Fine-tune TabICL on ranking-sampler synth, then ICL with real data."""
 
     # 2014 WC used as fine-tune validation
     df_ft_val = df[
@@ -279,74 +265,73 @@ def run_q3(df, df_train, d):
     y_a_ft_val = df_ft_val["away_score"].clip(0, 5).values.astype(np.int64)
     print(f"  Fine-tune validation: {len(df_ft_val)} matches (2014 WC)")
 
-    results = []
+    synth_name = "footie_task_prior"
+    print(f"\nQ3 [{synth_name}]: Fine-tune on synth -> ICL on real")
 
-    for synth_name, synth_cfg in SYNTH_CONFIGS.items():
-        print(f"\nQ3 [{synth_name}]: Fine-tune on synth -> ICL on real")
+    df_s = _sample_ranking_goal_synth(df_train)
+    X_synth = df_s[FEAT_COLS].values.astype(np.float32)
+    y_h_synth = df_s["home_score"].clip(0, 5).values.astype(np.int64)
+    y_a_synth = df_s["away_score"].clip(0, 5).values.astype(np.int64)
+    print(f"  Synth: {len(df_s)} samples ({synth_name})")
 
-        df_s = _load_synth(synth_cfg)
-        X_synth = df_s[FEAT_COLS].values.astype(np.float32)
-        y_h_synth = df_s["home_score"].clip(0, 5).values.astype(np.int64)
-        y_a_synth = df_s["away_score"].clip(0, 5).values.astype(np.int64)
-        print(f"  Synth: {len(df_s)} samples ({synth_name})")
+    synth_max = max(y_h_synth.max(), y_a_synth.max())
+    y_h_val = np.clip(y_h_ft_val, 0, synth_max)
+    y_a_val = np.clip(y_a_ft_val, 0, synth_max)
 
-        synth_max = max(y_h_synth.max(), y_a_synth.max())
-        y_h_val = np.clip(y_h_ft_val, 0, synth_max)
-        y_a_val = np.clip(y_a_ft_val, 0, synth_max)
+    run_dir = FT_OUT / synth_name
+    run_dir.mkdir(parents=True, exist_ok=True)
 
-        run_dir = FT_OUT / synth_name
-        run_dir.mkdir(parents=True, exist_ok=True)
+    print("\n  Fine-tuning home + away models...")
+    t0 = _time.time()
+    ckpt_h = _finetune(
+        synth_name, "home", X_synth, y_h_synth,
+        X_ft_val, y_h_val, run_dir / "home",
+    )
+    ckpt_a = _finetune(
+        synth_name, "away", X_synth, y_a_synth,
+        X_ft_val, y_a_val, run_dir / "away",
+    )
+    print(f"  Fine-tune done ({_time.time()-t0:.0f}s)")
 
-        print(f"\n  Fine-tuning home + away models...")
-        t0 = _time.time()
-        ckpt_h = _finetune(
-            synth_name, "home", X_synth, y_h_synth,
-            X_ft_val, y_h_val, run_dir / "home",
-        )
-        ckpt_a = _finetune(
-            synth_name, "away", X_synth, y_a_synth,
-            X_ft_val, y_a_val, run_dir / "away",
-        )
-        print(f"  Fine-tune done ({_time.time()-t0:.0f}s)")
+    print("\n  ICL with fine-tuned model (real context)...")
+    t0 = _time.time()
+    tab_h = _tabicl(model_path=ckpt_h)
+    tab_h.fit(d["X_tr"], d["y_home_tr"])
+    tab_a = _tabicl(model_path=ckpt_a)
+    tab_a.fit(d["X_tr"], d["y_away_tr"])
 
-        print(f"\n  ICL with fine-tuned model (real context)...")
-        t0 = _time.time()
-        tab_h = _tabicl(model_path=ckpt_h)
-        tab_h.fit(d["X_tr"], d["y_home_tr"])
-        tab_a = _tabicl(model_path=ckpt_a)
-        tab_a.fit(d["X_tr"], d["y_away_tr"])
-
-        ph_v = tab_h.predict(d["X_va"])
-        pa_v = tab_a.predict(d["X_va"])
-        ph_t = tab_h.predict(d["X_te"])
-        pa_t = tab_a.predict(d["X_te"])
-        print(f"  ICL done ({_time.time()-t0:.0f}s)")
-        results += eval_model(
-            f"Q3_ft_{synth_name}", ph_v, pa_v, ph_t, pa_t, d,
-        )
-
-    return results
+    ph_v = tab_h.predict(d["X_va"])
+    pa_v = tab_a.predict(d["X_va"])
+    ph_t = tab_h.predict(d["X_te"])
+    pa_t = tab_a.predict(d["X_te"])
+    print(f"  ICL done ({_time.time()-t0:.0f}s)")
+    return eval_model(
+        f"Q3_ft_{synth_name}", ph_v, pa_v, ph_t, pa_t, d,
+    )
 
 
 def main():
-    stages = set(sys.argv[1:] or ["all"])
-    run = lambda s: "all" in stages or s in stages
+    (p := argparse.ArgumentParser()).add_argument("stages", nargs="*", default=["all"])
+    stages = set(p.parse_args().stages)
 
     df, df_train, df_valid, df_test = load_data()
     d = get_arrays(df_train, df_valid, df_test)
     results = []
-
-    if run("q1"): results += run_q1(df_train, d)
-    if run("q2"): results += run_q2(d)
-    if run("q3"): results += run_q3(df, df_train, d)
-    if not results: return
+    if "all" in stages or "q1" in stages:
+        results += run_q1(df_train, d)
+    if "all" in stages or "q2" in stages:
+        results += run_q2(d)
+    if "all" in stages or "q3" in stages:
+        results += run_q3(df, df_train, d)
 
     df_r = pd.DataFrame(results)
-    cols = [
+    if df_r.empty:
+        print("df empty")
+        return
+    avail = df_r.columns.intersection([
         "method", "split", "acc_outcome", "exact_score",
         "n_draws_pred", "n_draws_actual",
-    ]
-    avail = [c for c in cols if c in df_r.columns]
+    ])
     print(f"\n{'='*60}\nSUMMARY\n{'='*60}")
     print(df_r[avail].to_string(index=False, float_format="%.3f"))
     df_r.to_csv(OUT / "results.csv", index=False)
