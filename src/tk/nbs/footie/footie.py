@@ -23,35 +23,7 @@ import pandas as pd
 from tk import datadir
 
 BASE_URL = "https://tmapi-alpha.transfermarkt.technology/"
-COMPETITIONS = {
-    "FIWC": {
-        2006: "2006-06-09", 2010: "2010-06-11", 2014: "2014-06-12",
-        2018: "2018-06-14", 2022: "2022-11-20", 2026: "2026-06-11",
-    },
-    "EURO": {
-        2008: "2008-06-07", 2012: "2012-06-08", 2016: "2016-06-10",
-        2021: "2021-06-11", 2024: "2024-06-14",
-    },
-    "COPA": {
-        2007: "2007-06-26", 2011: "2011-07-01", 2015: "2015-06-11",
-        2016: "2016-06-03", 2019: "2019-06-14", 2021: "2021-06-13",
-        2024: "2024-06-20",
-    },
-    "AFCN": {
-        2008: "2008-01-20", 2010: "2010-01-10", 2012: "2012-01-21",
-        2013: "2013-01-19", 2015: "2015-01-17", 2017: "2017-01-14",
-        2019: "2019-06-21", 2022: "2022-01-09", 2024: "2024-01-13",
-    },
-    "AFAC": {
-        2007: "2007-07-07", 2011: "2011-01-07", 2015: "2015-01-09",
-        2019: "2019-01-05", 2023: "2023-01-12",
-    },
-    "GOCU": {
-        2007: "2007-06-06", 2009: "2009-07-03", 2011: "2011-06-05",
-        2013: "2013-07-07", 2015: "2015-07-07", 2017: "2017-07-07",
-        2019: "2019-06-15", 2021: "2021-07-10", 2023: "2023-06-24",
-    },
-}
+
 TM_ROOT = datadir / "transfermarkt"
 MATCHES_CSV = datadir / "international_football" / "results.csv"
 RANKINGS_ROOT = datadir / "international_football" / "rankings"
@@ -110,14 +82,6 @@ def normalize_team_name(name: str) -> str:
     name = str(name or "").strip()
     return RANKING_NAME_MAP.get(name, name)
 
-
-WC_FINAL_RANK = {
-    2006: ["Itália", "França", "Alemanha", "Portugal"],
-    2010: ["Espanha", "Holanda", "Alemanha", "Uruguai"],
-    2014: ["Alemanha", "Argentina", "Holanda", "Brasil"],
-    2018: ["França", "Croácia", "Bélgica", "Inglaterra"],
-    2022: ["Argentina", "França", "Croácia", "Marrocos"],
-}
 
 
 @dataclass(frozen=True)
@@ -463,7 +427,6 @@ def fetch_comp_year(
     return summary
 
 def iter_tm_year_dirs(root: Path = TM_ROOT) -> Iterator[tuple[int, Path]]:
-    """Yield (year, year_dir) for each valid transfermarkt year directory."""
     for comp_dir in root.iterdir():
         if not comp_dir.is_dir() or comp_dir.name.startswith("_"):
             continue
@@ -476,11 +439,6 @@ def iter_tm_year_dirs(root: Path = TM_ROOT) -> Iterator[tuple[int, Path]]:
 
 
 def load_tm_data(year_dir: Path) -> tuple[dict, dict]:
-    """Load transfermarkt data from a year directory.
-
-    Returns (features_by_club, {"squads": ..., "snapshots": ...}).
-    """
-    assert year_dir.exists(), f"TM year dir missing: {year_dir}"
     features = json.loads((year_dir / "team_features.json").read_text())
     squads = json.loads(p.read_text()) if (p := year_dir / "squads.json").exists() else {}
     snapshots = json.loads(p.read_text()) if (p := year_dir / "player_snapshots.json").exists() else {}
@@ -554,7 +512,6 @@ def fetch_fifa_rankings(
     refresh_schedule: bool = False,
     timeout: float = 30.0,
 ) -> list[Path]:
-    """Fetch official FIFA men's ranking snapshots into per-year JSON files."""
     root.mkdir(parents=True, exist_ok=True)
     schedule_path = root / "schedules.json"
     schedules = (
@@ -618,7 +575,7 @@ def load_fifa_rankings(root: Path = FIFA_RANKINGS_ROOT) -> pd.DataFrame:
                 "previous_rank": _num(item.get("previousRank")),
                 "previous_rating": _num(entry.get("previousPoints")),
             })
-    return pd.DataFrame(rows).sort_values(["team", "date"], kind="mergesort") if rows else pd.DataFrame(rows)
+    return pd.DataFrame(rows).sort_values(["team", "date"], kind="mergesort")
 
 
 def fetch_elo_ratings(
@@ -634,16 +591,24 @@ def fetch_elo_ratings(
     if not teams_path.exists():
         teams_path.write_text(_get_text(f"{ELO_RATINGS_BASE_URL}/en.teams.tsv", timeout=timeout))
         paths.append(teams_path)
-    year_list = list(years or range(1992, pd.Timestamp.today().year + 1))
-    for year in year_list:
-        out_dir = root / str(int(year))
+    headers = {
+        "start": "marker\trank\tcode\trating",
+        "results": "\t".join([
+            "year", "month", "day", "home_code", "away_code",
+            "home_score", "away_score", "match_type", "venue", "margin",
+            "home_rating", "away_rating", "home_delta", "away_delta",
+            "home_rank", "away_rank",
+        ]),
+    }
+    for year in (years or range(1992, pd.Timestamp.today().year + 1)):
+        out_dir = root / f"{year}"
         out_dir.mkdir(parents=True, exist_ok=True)
-        for name, page in (("start", f"{int(year)}_start.tsv"), ("results", f"{int(year)}_results.tsv")):
-            out = out_dir / f"{name}.tsv"
-            if out.exists():
+        for name in ("start", "results"):
+            if (out := out_dir / f"{name}.tsv").exists():
                 paths.append(out)
                 continue
-            out.write_text(_get_text(f"{ELO_RATINGS_BASE_URL}/{page}", timeout=timeout))
+            text = _get_text(f"{ELO_RATINGS_BASE_URL}/{int(year)}_{name}.tsv", timeout=timeout)
+            out.write_text(headers[name] + "\n" + text)
             paths.append(out)
             if sleep_s:
                 time.sleep(sleep_s)
@@ -665,37 +630,37 @@ def _load_elo_team_names(root: Path = ELO_RATINGS_ROOT) -> dict[str, str]:
 
 def _elo_snapshot_rows(path: Path, date: Any, teams: dict[str, str], source: str) -> list[dict[str, Any]]:
     rows = []
-    for line in path.read_text().splitlines():
-        fields = line.split("\t")
-        if len(fields) < 4:
-            continue
-        code = fields[2]
+    df = pd.read_csv(path, sep="\t", usecols=["rank", "code", "rating"])
+    for _, r in df.iterrows():
+        code = r["code"]
         rows.append({
             "source": source,
             "date": date,
             "team": normalize_team_name(teams.get(code, code)),
             "country_code": code,
-            "rank": _num(fields[1]),
-            "rating": _num(fields[3]),
+            "rank": _num(r["rank"]),
+            "rating": _num(r["rating"]),
         })
     return rows
 
 
 def _elo_result_rows(path: Path, teams: dict[str, str]) -> list[dict[str, Any]]:
     rows = []
-    for line in path.read_text().splitlines():
-        fields = line.split("\t")
-        if len(fields) < 16:
-            continue
-        date = pd.Timestamp(year=int(fields[0]), month=int(fields[1]), day=int(fields[2]))
-        for code, rating, rank in ((fields[3], fields[10], fields[14]), (fields[4], fields[11], fields[15])):
+    df = pd.read_csv(path, sep="\t", usecols=[
+        "year", "month", "day", "home_code", "away_code",
+        "home_rating", "away_rating", "home_rank", "away_rank",
+    ])
+    for _, r in df.iterrows():
+        date = pd.Timestamp(year=int(r["year"]), month=int(r["month"]), day=int(r["day"]))
+        for side in ("home", "away"):
+            code = r[f"{side}_code"]
             rows.append({
                 "source": "elo",
                 "date": date,
                 "team": normalize_team_name(teams.get(code, code)),
                 "country_code": code,
-                "rank": _num(rank),
-                "rating": _num(rating),
+                "rank": _num(r[f"{side}_rank"]),
+                "rating": _num(r[f"{side}_rating"]),
             })
     return rows
 
@@ -715,7 +680,9 @@ def load_elo_ratings(root: Path = ELO_RATINGS_ROOT) -> pd.DataFrame:
         results = year_dir / "results.tsv"
         if results.exists():
             rows.extend(_elo_result_rows(results, teams))
-    return pd.DataFrame(rows).sort_values(["team", "date"], kind="mergesort") if rows else pd.DataFrame(rows)
+    if not rows:
+        return pd.DataFrame(rows)
+    return pd.DataFrame(rows).sort_values(["team", "date"], kind="mergesort")
 
 
 def load_match_dataset(tm_db: dict[str, dict[int, list[float]]]) -> pd.DataFrame:
@@ -763,7 +730,6 @@ def compute_metrics(
     true_home: np.ndarray, true_away: np.ndarray,
     true_outcome: np.ndarray,
 ) -> dict[str, float]:
-    """Compute outcome acc, exact score acc, MAE, draw counts."""
     pred_outcome = np.where(
         pred_home > pred_away, 2,
         np.where(pred_home == pred_away, 1, 0),
@@ -779,7 +745,7 @@ def compute_metrics(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=(__doc__ or "TM API client").splitlines()[0])
-    parser.add_argument("command", choices=sorted(ENDPOINTS))
+    parser.add_argument("command", choices=[*ENDPOINTS, "fetch_all", "analyze"])
     parser.add_argument("values", nargs="*")
     parser.add_argument("--no-cache", action="store_true")
     args = parser.parse_args()
