@@ -9,7 +9,7 @@ import argparse
 import json
 import math
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from functools import partialmethod
 from pathlib import Path
@@ -53,6 +53,13 @@ COMPETITIONS = {
     },
 }
 TM_ROOT = datadir / "transfermarkt"
+MATCHES_CSV = datadir / "international_football" / "results.csv"
+RANKINGS_ROOT = datadir / "international_football" / "rankings"
+FIFA_RANKINGS_ROOT = RANKINGS_ROOT / "fifa"
+ELO_RATINGS_ROOT = RANKINGS_ROOT / "elo"
+FIFA_RANKING_SCHEDULE_URL = "https://api.fifa.com/api/v3/rankingschedules/all?type=0&gender=1"
+FIFA_RANKING_OVERVIEW_URL = "https://inside.fifa.com/api/ranking-overview"
+ELO_RATINGS_BASE_URL = "https://www.eloratings.net"
 
 ROSTER_COLS = [
     "logMarketValue", "logTop11MarketValue", "benchShare",
@@ -73,6 +80,36 @@ TOURNAMENT_IMPORTANCE = {  # nate silver pele vals
     "Copa América": 4, "AFC Asian Cup": 3, "African Cup of Nations": 3,
     "CONCACAF Gold Cup": 3, "Confederations Cup": 3}
 NAME_MAP = {"Brasil": "Brazil", "Alemanha": "Germany", "França": "France", "Espanha": "Spain", "Inglaterra": "England", "Holanda": "Netherlands", "Itália": "Italy", "Argentina": "Argentina", "Portugal": "Portugal", "Bélgica": "Belgium", "Croácia": "Croatia", "Uruguai": "Uruguay", "Colômbia": "Colombia", "México": "Mexico", "Suíça": "Switzerland", "Dinamarca": "Denmark", "Suécia": "Sweden", "Polônia": "Poland", "Sérvia": "Serbia", "Senegal": "Senegal", "Marrocos": "Morocco", "Japão": "Japan", "Coreia do Sul": "South Korea", "Austrália": "Australia", "Irã": "Iran", "Arábia Saudita": "Saudi Arabia", "Tunísia": "Tunisia", "Gana": "Ghana", "Camarões": "Cameroon", "Nigéria": "Nigeria", "Costa do Marfim": "Ivory Coast", "Argélia": "Algeria", "Egito": "Egypt", "EUA": "United States", "Costa Rica": "Costa Rica", "Canadá": "Canada", "Equador": "Ecuador", "Paraguai": "Paraguay", "Chile": "Chile", "Peru": "Peru", "Honduras": "Honduras", "Panamá": "Panama", "Catar": "Qatar", "País de Gales": "Wales", "Escócia": "Scotland", "República Tcheca": "Czech Republic", "Ucrânia": "Ukraine", "Rússia": "Russia", "Grécia": "Greece", "Eslováquia": "Slovakia", "Eslovênia": "Slovenia", "Bósnia e Herzegovina": "Bosnia and Herzegovina", "Togo": "Togo", "Angola": "Angola", "Trinidad e Tobago": "Trinidad and Tobago", "Sérvia e Montenegro": "Serbia and Montenegro", "República da Irlanda": "Republic of Ireland", "África do Sul": "South Africa", "Nova Zelândia": "New Zealand", "Coreia do Norte": "North Korea", "Albânia": "Albania", "Bahrein": "Bahrain", "Benim": "Benin", "Bermudas": "Bermuda", "Bolívia": "Bolivia", "Burquina Faso": "Burkina Faso", "Burúndi": "Burundi", "Cabo Verde": "Cape Verde", "Comores": "Comoros", "Emirados Árabes Unidos": "United Arab Emirates", "Estados Unidos": "United States", "Etiópia": "Ethiopia", "Filipinas": "Philippines", "Finlândia": "Finland", "Gabão": "Gabon", "Geórgia": "Georgia", "Granada": "Grenada", "Guadalupe": "Guadeloupe", "Guiana": "Guyana", "Guiana Francesa": "French Guiana", "Guiné": "Guinea", "Guiné Equatorial": "Equatorial Guinea", "Guiné-Bissau": "Guinea-Bissau", "Gâmbia": "Gambia", "Hungria": "Hungary", "Indonésia": "Indonesia", "Iraque": "Iraq", "Irlanda do Norte": "Northern Ireland", "Islândia": "Iceland", "Iémen": "Yemen", "Jordânia": "Jordan", "Líbano": "Lebanon", "Líbia": "Libya", "Macedônia do Norte": "North Macedonia", "Madagáscar": "Madagascar", "Malaui": "Malawi", "Malásia": "Malaysia", "Martinica": "Martinique", "Mauritânia": "Mauritania", "Moçambique": "Mozambique", "Máli": "Mali", "Namíbia": "Namibia", "Nicarágua": "Nicaragua", "Noruega": "Norway", "Níger": "Niger", "Omã": "Oman", "Palestina": "Palestine", "Quirguistão": "Kyrgyzstan", "Quénia": "Kenya", "República Democrática do Congo": "DR Congo", "República do Congo": "Congo", "Romênia": "Romania", "Serra Leoa": "Sierra Leone", "Sudão": "Sudan", "São Cristóvão e Névis": "Saint Kitts and Nevis", "Síria": "Syria", "Tailândia": "Thailand", "Tajiquistão": "Tajikistan", "Tanzânia": "Tanzania", "Tchéquia": "Czech Republic", "Trindade e Tobago": "Trinidad and Tobago", "Turquemenistão": "Turkmenistan", "Turquia": "Turkey", "Uzbequistão": "Uzbekistan", "Vietnã": "Vietnam", "Zimbábue": "Zimbabwe", "Zâmbia": "Zambia", "Áustria": "Austria", "Índia": "India", "Curaçau": "Curaçao", }
+
+RANKING_NAME_MAP = NAME_MAP | {
+    "Cape Verde Islands": "Cape Verde",
+    "China PR": "China",
+    "Chinese Taipei": "Taiwan",
+    "Congo DR": "DR Congo",
+    "Côte d'Ivoire": "Ivory Coast",
+    "Czechia": "Czech Republic",
+    "England": "England",
+    "FYR Macedonia": "North Macedonia",
+    "IR Iran": "Iran",
+    "Korea DPR": "North Korea",
+    "Korea Republic": "South Korea",
+    "Republic of Ireland": "Republic of Ireland",
+    "St Kitts and Nevis": "Saint Kitts and Nevis",
+    "St. Kitts and Nevis": "Saint Kitts and Nevis",
+    "St Lucia": "Saint Lucia",
+    "St. Lucia": "Saint Lucia",
+    "St Vincent and the Grenadines": "Saint Vincent and the Grenadines",
+    "St. Vincent and the Grenadines": "Saint Vincent and the Grenadines",
+    "Türkiye": "Turkey",
+    "USA": "United States",
+    "US Virgin Islands": "United States Virgin Islands",
+}
+
+
+def normalize_team_name(name: str) -> str:
+    name = str(name or "").strip()
+    return RANKING_NAME_MAP.get(name, name)
+
 
 WC_FINAL_RANK = {
     2006: ["Itália", "França", "Alemanha", "Portugal"],
@@ -232,7 +269,7 @@ def get_value_features(
     total = sum(values)
     top11 = sum(values[-11:])
     top23 = sum(values[-23:])
-    age_mean = ratio(sum(ages), len(ages)) if ages else None
+    age_mean = _ratio(sum(ages), len(ages)) if ages else None
     age_std = None
     if age_mean is not None:
         age_var = sum((age - age_mean) ** 2 for age in ages)
@@ -248,22 +285,22 @@ def get_value_features(
         "top23MarketValueEur": top23,
         "logTop23MarketValue": math.log1p(top23),
         "benchValueEur": top23 - top11,
-        "benchShare": ratio(top23 - top11, top23),
-        "starConcentration": ratio(values[-1], total) if values else None,
-        "top3Share": ratio(sum(values[-3:]), total),
-        "top5Share": ratio(sum(values[-5:]), total),
-        "valueWeightedAge": ratio(age_value, total),
+        "benchShare": _ratio(top23 - top11, top23),
+        "starConcentration": _ratio(values[-1], total) if values else None,
+        "top3Share": _ratio(sum(values[-3:]), total),
+        "top5Share": _ratio(sum(values[-5:]), total),
+        "valueWeightedAge": _ratio(age_value, total),
         "ageMean": age_mean,
         "ageStd": age_std,
         "positionValueEur": dict(sorted(position_values.items())),
         "attackValueEur": attack,
         "defenseValueEur": defense,
-        "attackTilt": ratio(attack - defense, total),
-        "attackDefenseRatio": ratio(attack, defense),
-        "gkValueShare": ratio(position_values.get("GOALKEEPER", 0), total),
-        "defValueShare": ratio(position_values.get("DEFENDER", 0), total),
-        "midValueShare": ratio(mid, total),
-        "fwdValueShare": ratio(position_values.get("FORWARD", 0), total),
+        "attackTilt": _ratio(attack - defense, total),
+        "attackDefenseRatio": _ratio(attack, defense),
+        "gkValueShare": _ratio(position_values.get("GOALKEEPER", 0), total),
+        "defValueShare": _ratio(position_values.get("DEFENDER", 0), total),
+        "midValueShare": _ratio(mid, total),
+        "fwdValueShare": _ratio(position_values.get("FORWARD", 0), total),
     }
 
 
@@ -303,12 +340,12 @@ def get_roster_features(
 
     total = sum(values)
     roster_share_feats = {
-        "u23ValueShare": ratio(u23_value, total),
-        "u25ValueShare": ratio(u25_value, total),
-        "over30ValueShare": ratio(over30_value, total),
-        "domesticClubShare": ratio(domestic_count, current_count),
-        "domesticValueShare": ratio(domestic_value, total),
-        "uefaClubValueShare": ratio(uefa_value, total),
+        "u23ValueShare": _ratio(u23_value, total),
+        "u25ValueShare": _ratio(u25_value, total),
+        "over30ValueShare": _ratio(over30_value, total),
+        "domesticClubShare": _ratio(domestic_count, current_count),
+        "domesticValueShare": _ratio(domestic_value, total),
+        "uefaClubValueShare": _ratio(uefa_value, total),
     }
 
     captain_ids = {p["playerId"] for p in squad.get("squad", [])
@@ -335,8 +372,8 @@ def get_roster_features(
 
 def get_batched_rows(ids: Sequence[str], fetcher: Callable[..., Any]) -> dict[str, Any]:
     result = {}
-    for i in range(0, len(ids), TMAPI_BATCH_SIZE):
-        batch = ids[i : i + TMAPI_BATCH_SIZE]
+    for i in range(0, len(ids), 100):
+        batch = ids[i : i + 100]
         data = fetcher(ids=batch)["data"]
         for item in data:
             result[str(item["id"])] = item
@@ -425,21 +462,38 @@ def fetch_comp_year(
     (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary
 
+def iter_tm_year_dirs(root: Path = TM_ROOT) -> Iterator[tuple[int, Path]]:
+    """Yield (year, year_dir) for each valid transfermarkt year directory."""
+    for comp_dir in root.iterdir():
+        if not comp_dir.is_dir() or comp_dir.name.startswith("_"):
+            continue
+        for year_dir in comp_dir.iterdir():
+            if not year_dir.is_dir() or not year_dir.name.isdigit():
+                continue
+            if not (year_dir / "team_features.json").exists():
+                continue
+            yield int(year_dir.name), year_dir
+
+
+def load_tm_data(year_dir: Path) -> tuple[dict, dict]:
+    """Load transfermarkt data from a year directory.
+
+    Returns (features_by_club, {"squads": ..., "snapshots": ...}).
+    """
+    assert year_dir.exists(), f"TM year dir missing: {year_dir}"
+    features = json.loads((year_dir / "team_features.json").read_text())
+    squads = json.loads(p.read_text()) if (p := year_dir / "squads.json").exists() else {}
+    snapshots = json.loads(p.read_text()) if (p := year_dir / "player_snapshots.json").exists() else {}
+    return features, {"squads": squads, "snapshots": snapshots}
+
+
 def load_tm_features() -> dict[str, dict[int, list[float]]]:
     db: dict[str, dict[int, list[float]]] = {}
-    for cd in TM_ROOT.iterdir():
-        if not cd.is_dir() or cd.name.startswith("_"):
-            continue
-        for yd in cd.iterdir():
-            if not yd.is_dir():
-                continue
-            if not (tf := yd / "team_features.json").exists():
-                continue
-            for feats in json.loads(tf.read_text()).values():
-                name = NAME_MAP.get(feats.get("name", ""),
-                    feats.get("name", ""))
-                vec = [feats.get(c, 0) or 0 for c in ROSTER_COLS]
-                db.setdefault(name, {})[int(yd.name)] = vec
+    for year, year_dir in iter_tm_year_dirs():
+        features, _ = load_tm_data(year_dir)
+        for feats in features.values():
+            name = normalize_team_name(str(feats.get("name") or ""))
+            db.setdefault(name, {})[year] = [float(feats.get(c, 0) or 0) for c in ROSTER_COLS]
     return db
 
 
@@ -454,8 +508,218 @@ def get_team_vec(db: dict[str, dict[int, list[float]]], team: str, year: int) ->
     return team_db[max(candidates)]
 
 
+def _get_json(url: str, timeout: float = 30.0) -> Any:
+    request = Request(url, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"})
+    with urlopen(request, timeout=timeout) as response:
+        return json.load(response)
+
+
+def _get_text(url: str, timeout: float = 30.0) -> str:
+    request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(request, timeout=timeout) as response:
+        return response.read().decode("utf-8")
+
+
+def _clean_ts(value: Any):
+    if not value:
+        return None
+    ts = pd.Timestamp(pd.to_datetime(value, utc=True, errors="coerce"))
+    if pd.isna(ts):
+        return None
+    return ts.tz_convert(None) if ts.tzinfo is not None else ts
+
+
+def _num(value: Any, default: float = np.nan) -> float:
+    try:
+        return float(str(value).replace("−", "-"))
+    except (TypeError, ValueError):
+        return default
+
+
+def fetch_fifa_ranking_schedules(
+    root: Path = FIFA_RANKINGS_ROOT,
+    timeout: float = 30.0,
+) -> list[dict[str, Any]]:
+    root.mkdir(parents=True, exist_ok=True)
+    data = _get_json(FIFA_RANKING_SCHEDULE_URL, timeout=timeout)
+    schedules = list(data.get("Results", []))
+    (root / "schedules.json").write_text(json.dumps(schedules, ensure_ascii=False, indent=2))
+    return schedules
+
+
+def fetch_fifa_rankings(
+    years: Sequence[int] | None = None,
+    root: Path = FIFA_RANKINGS_ROOT,
+    sleep_s: float = 0.0,
+    refresh_schedule: bool = False,
+    timeout: float = 30.0,
+) -> list[Path]:
+    """Fetch official FIFA men's ranking snapshots into per-year JSON files."""
+    root.mkdir(parents=True, exist_ok=True)
+    schedule_path = root / "schedules.json"
+    schedules = (
+        json.loads(schedule_path.read_text())
+        if schedule_path.exists() and not refresh_schedule
+        else fetch_fifa_ranking_schedules(root=root, timeout=timeout)
+    )
+    year_set = None if years is None else {int(year) for year in years}
+    paths = []
+    for schedule in schedules:
+        date = _clean_ts(schedule.get("OfficialDate") or schedule.get("VisibilityDate"))
+        if date is None:
+            continue
+        year = int(date.year)
+        if year_set is not None and year not in year_set:
+            continue
+        schedule_id = str(schedule["IdRankingSchedule"])
+        out = root / str(year) / f"{schedule_id}.json"
+        if out.exists():
+            paths.append(out)
+            continue
+        params = urlencode({"locale": "en", "dateId": schedule_id, "rankingType": "football"})
+        data = _get_json(f"{FIFA_RANKING_OVERVIEW_URL}?{params}", timeout=timeout)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({"schedule": schedule, "rankings": data.get("rankings", [])}, ensure_ascii=False, indent=2))
+        paths.append(out)
+        if sleep_s:
+            time.sleep(sleep_s)
+    return paths
+
+
+def load_fifa_rankings(root: Path = FIFA_RANKINGS_ROOT) -> pd.DataFrame:
+    rows = []
+    if not root.exists():
+        return pd.DataFrame(rows)
+    for path in sorted(root.glob("*/*.json")):
+        data = json.loads(path.read_text())
+        schedule = data.get("schedule", {})
+        published_at = _clean_ts(schedule.get("VisibilityDate") or schedule.get("OfficialDate"))
+        rank_date = _clean_ts(schedule.get("OfficialDate") or schedule.get("VisibilityDate"))
+        match_window_end = _clean_ts(schedule.get("MatchWindowEndDate"))
+        if published_at is None:
+            continue
+        for entry in data.get("rankings", []):
+            item = entry.get("rankingItem", {})
+            raw_team = str(item.get("name") or "")
+            team = normalize_team_name(raw_team)
+            if not team:
+                continue
+            rows.append({
+                "source": "fifa",
+                "date": published_at,
+                "rank_date": rank_date,
+                "match_window_end": match_window_end,
+                "schedule_id": schedule.get("IdRankingSchedule"),
+                "team": team,
+                "raw_team": raw_team,
+                "country_code": item.get("countryCode"),
+                "rank": _num(item.get("rank")),
+                "rating": _num(item.get("totalPoints")),
+                "previous_rank": _num(item.get("previousRank")),
+                "previous_rating": _num(entry.get("previousPoints")),
+            })
+    return pd.DataFrame(rows).sort_values(["team", "date"], kind="mergesort") if rows else pd.DataFrame(rows)
+
+
+def fetch_elo_ratings(
+    years: Sequence[int] | None = None,
+    root: Path = ELO_RATINGS_ROOT,
+    sleep_s: float = 0.0,
+    timeout: float = 30.0,
+) -> list[Path]:
+    """Fetch World Football Elo TSVs into per-year directories."""
+    root.mkdir(parents=True, exist_ok=True)
+    paths = []
+    teams_path = root / "en.teams.tsv"
+    if not teams_path.exists():
+        teams_path.write_text(_get_text(f"{ELO_RATINGS_BASE_URL}/en.teams.tsv", timeout=timeout))
+        paths.append(teams_path)
+    year_list = list(years or range(1992, pd.Timestamp.today().year + 1))
+    for year in year_list:
+        out_dir = root / str(int(year))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for name, page in (("start", f"{int(year)}_start.tsv"), ("results", f"{int(year)}_results.tsv")):
+            out = out_dir / f"{name}.tsv"
+            if out.exists():
+                paths.append(out)
+                continue
+            out.write_text(_get_text(f"{ELO_RATINGS_BASE_URL}/{page}", timeout=timeout))
+            paths.append(out)
+            if sleep_s:
+                time.sleep(sleep_s)
+    return paths
+
+
+def _load_elo_team_names(root: Path = ELO_RATINGS_ROOT) -> dict[str, str]:
+    path = root / "en.teams.tsv"
+    if not path.exists():
+        return {}
+    names = {}
+    for line in path.read_text().splitlines():
+        fields = line.split("\t")
+        if len(fields) < 2 or fields[0].endswith("_loc"):
+            continue
+        names[fields[0]] = normalize_team_name(fields[1])
+    return names
+
+
+def _elo_snapshot_rows(path: Path, date: Any, teams: dict[str, str], source: str) -> list[dict[str, Any]]:
+    rows = []
+    for line in path.read_text().splitlines():
+        fields = line.split("\t")
+        if len(fields) < 4:
+            continue
+        code = fields[2]
+        rows.append({
+            "source": source,
+            "date": date,
+            "team": normalize_team_name(teams.get(code, code)),
+            "country_code": code,
+            "rank": _num(fields[1]),
+            "rating": _num(fields[3]),
+        })
+    return rows
+
+
+def _elo_result_rows(path: Path, teams: dict[str, str]) -> list[dict[str, Any]]:
+    rows = []
+    for line in path.read_text().splitlines():
+        fields = line.split("\t")
+        if len(fields) < 16:
+            continue
+        date = pd.Timestamp(year=int(fields[0]), month=int(fields[1]), day=int(fields[2]))
+        for code, rating, rank in ((fields[3], fields[10], fields[14]), (fields[4], fields[11], fields[15])):
+            rows.append({
+                "source": "elo",
+                "date": date,
+                "team": normalize_team_name(teams.get(code, code)),
+                "country_code": code,
+                "rank": _num(rank),
+                "rating": _num(rating),
+            })
+    return rows
+
+
+def load_elo_ratings(root: Path = ELO_RATINGS_ROOT) -> pd.DataFrame:
+    rows = []
+    if not root.exists():
+        return pd.DataFrame(rows)
+    teams = _load_elo_team_names(root)
+    for year_dir in sorted(root.iterdir()):
+        if not year_dir.is_dir() or not year_dir.name.isdigit():
+            continue
+        year = int(year_dir.name)
+        start = year_dir / "start.tsv"
+        if start.exists():
+            rows.extend(_elo_snapshot_rows(start, pd.Timestamp(year=year, month=1, day=1), teams, "elo_start"))
+        results = year_dir / "results.tsv"
+        if results.exists():
+            rows.extend(_elo_result_rows(results, teams))
+    return pd.DataFrame(rows).sort_values(["team", "date"], kind="mergesort") if rows else pd.DataFrame(rows)
+
+
 def load_match_dataset(tm_db: dict[str, dict[int, list[float]]]) -> pd.DataFrame:
-    df = pd.read_csv(datadir / "international_football" / "results.csv")
+    df = pd.read_csv(MATCHES_CSV)
     df = df[df["date"] >= "2006-01-01"].copy()
     df["year"] = pd.to_datetime(df["date"]).dt.year
     df["importance"] = df["tournament"].apply(lambda t: next(
@@ -514,7 +778,7 @@ def compute_metrics(
     }
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "TM API client").splitlines()[0])
     parser.add_argument("command", choices=sorted(ENDPOINTS))
     parser.add_argument("values", nargs="*")
     parser.add_argument("--no-cache", action="store_true")
